@@ -88,3 +88,21 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes progressBar {
+  0% {
+    width: 0%;
+  }
+  25% {
+    width: 30%;
+  }
+  50% {
+    width: 60%;
+  }
+  75% {
+    width: 85%;
+  }
+  100% {
+    width: 100%;
+  }
+}

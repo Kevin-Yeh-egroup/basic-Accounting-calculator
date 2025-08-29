@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Loader2 } from "lucide-react"
+import { Loader2, ArrowLeft, Brain, Sparkles, BarChart3, Target } from "lucide-react"
 import IncomeTable from "./components/income-table"
 import ExpenseTable from "./components/expense-table"
 import FinancialReport from "./components/financial-report"
@@ -67,6 +67,8 @@ export default function MonthlyFinanceAnalyzer() {
 看醫生500元，掛號費和藥費。
 給父母孝親費8000元，已轉帳。
 儲蓄5000元，存入定存帳戶。`)
+
+  const [showResults, setShowResults] = useState(false)
 
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>({
     incomes: [
@@ -265,12 +267,16 @@ export default function MonthlyFinanceAnalyzer() {
     ],
   })
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [activeTab, setActiveTab] = useState("income")
+  const [activeTab, setActiveTab] = useState("input")
 
   const handleAnalyze = async () => {
     if (!inputText.trim()) return
 
     setIsAnalyzing(true)
+    
+    // 模擬10秒的AI分析過程
+    await new Promise(resolve => setTimeout(resolve, 10000))
+    
     try {
       const response = await fetch("/api/analyze-text", {
         method: "POST",
@@ -281,12 +287,18 @@ export default function MonthlyFinanceAnalyzer() {
       if (response.ok) {
         const result = await response.json()
         setAnalysisResult(result)
-        setActiveTab("income")
+      } else {
+        // 如果 API 失敗，使用預設的示例資料
+        console.log("API failed, using default data for demo")
       }
     } catch (error) {
       console.error("Analysis failed:", error)
+      // 如果 API 失敗，使用預設的示例資料
+      console.log("Using default data for demo")
     } finally {
       setIsAnalyzing(false)
+      setShowResults(true) // 無論如何都切換到結果頁面
+      setActiveTab("income") // 設定預設顯示收入明細
     }
   }
 
@@ -294,6 +306,105 @@ export default function MonthlyFinanceAnalyzer() {
   const totalExpense = analysisResult?.expenses.reduce((sum, item) => sum + item.subtotal, 0) || 0
   const netCashFlow = totalIncome - totalExpense
 
+  const handleBackToInput = () => {
+    setShowResults(false)
+    setActiveTab("input")
+  }
+
+  // 如果正在分析，顯示讀取畫面
+  if (isAnalyzing) {
+    return (
+      <div className="container mx-auto p-6 max-w-7xl min-h-screen flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardContent className="pt-6">
+            <div className="text-center space-y-6">
+              <div className="relative">
+                <div className="w-20 h-20 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
+                  <Brain className="w-10 h-10 text-blue-600 animate-pulse" />
+                </div>
+                <div className="absolute inset-0 w-20 h-20 mx-auto border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+              </div>
+              
+              <div className="space-y-2">
+                <h2 className="text-2xl font-bold text-blue-600">AI智能分析中</h2>
+                <p className="text-muted-foreground">正在解析您的收支資訊...</p>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-center space-x-2 text-sm text-blue-600">
+                  <Sparkles className="w-4 h-4" />
+                  <span>識別收入項目</span>
+                </div>
+                <div className="flex items-center justify-center space-x-2 text-sm text-green-600">
+                  <BarChart3 className="w-4 h-4" />
+                  <span>分析支出結構</span>
+                </div>
+                <div className="flex items-center justify-center space-x-2 text-sm text-purple-600">
+                  <Target className="w-4 h-4" />
+                  <span>計算財務指標</span>
+                </div>
+              </div>
+              
+              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                <div className="bg-blue-600 h-2 rounded-full" 
+                     style={{animation: "progressBar 10s ease-out forwards"}}>
+                </div>
+              </div>
+              
+              <p className="text-xs text-muted-foreground">預計需要 10 秒完成分析</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // 如果要顯示結果，顯示結果頁面
+  if (showResults && analysisResult) {
+    return (
+      <div className="container mx-auto p-6 max-w-7xl">
+        <div className="mb-6">
+          <Button 
+            onClick={handleBackToInput} 
+            variant="outline" 
+            className="mb-4"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            返回輸入畫面
+          </Button>
+          <h1 className="text-3xl font-bold mb-2">分析結果</h1>
+          <p className="text-muted-foreground">AI已完成您的收支分析，以下是詳細結果</p>
+        </div>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="income">收入明細</TabsTrigger>
+            <TabsTrigger value="expense">支出明細</TabsTrigger>
+            <TabsTrigger value="analysis">財務分析</TabsTrigger>
+            <TabsTrigger value="report">財務月報</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="income">
+            <IncomeTable incomes={analysisResult.incomes} />
+          </TabsContent>
+
+          <TabsContent value="expense">
+            <ExpenseTable expenses={analysisResult.expenses} />
+          </TabsContent>
+
+          <TabsContent value="analysis">
+            <CashFlowAnalysis incomes={analysisResult.incomes} expenses={analysisResult.expenses} />
+          </TabsContent>
+
+          <TabsContent value="report">
+            <FinancialReport incomes={analysisResult.incomes} expenses={analysisResult.expenses} />
+          </TabsContent>
+        </Tabs>
+      </div>
+    )
+  }
+
+  // 預設顯示輸入畫面
   return (
     <div className="container mx-auto p-6 max-w-7xl">
       <div className="mb-8">
@@ -301,24 +412,7 @@ export default function MonthlyFinanceAnalyzer() {
         <p className="text-muted-foreground">使用AI智能辨識收入支出，自動生成財務分析報表</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="input">文字輸入</TabsTrigger>
-          <TabsTrigger value="income" disabled={!analysisResult}>
-            收入明細
-          </TabsTrigger>
-          <TabsTrigger value="expense" disabled={!analysisResult}>
-            支出明細
-          </TabsTrigger>
-          <TabsTrigger value="analysis" disabled={!analysisResult}>
-            財務分析
-          </TabsTrigger>
-          <TabsTrigger value="report" disabled={!analysisResult}>
-            財務月報
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="input" className="space-y-6">
+      <div className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>輸入收支資訊</CardTitle>
@@ -329,7 +423,7 @@ export default function MonthlyFinanceAnalyzer() {
                 placeholder="例如：今天賣了50杯咖啡，每杯80元，總共4000元。租金15000元，水電費2000元，買咖啡豆花了8000元..."
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                className="min-h-[200px]"
+                className="min-h-[400px] text-base"
               />
               <Button onClick={handleAnalyze} disabled={!inputText.trim() || isAnalyzing} className="w-full">
                 {isAnalyzing ? (
@@ -344,49 +438,8 @@ export default function MonthlyFinanceAnalyzer() {
             </CardContent>
           </Card>
 
-          {analysisResult && (
-            <Card>
-              <CardHeader>
-                <CardTitle>分析結果概覽</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="text-center p-4 bg-green-50 rounded-lg">
-                    <div className="text-2xl font-bold text-green-600">${totalIncome.toLocaleString()}</div>
-                    <div className="text-sm text-muted-foreground">總收入</div>
-                  </div>
-                  <div className="text-center p-4 bg-red-50 rounded-lg">
-                    <div className="text-2xl font-bold text-red-600">${totalExpense.toLocaleString()}</div>
-                    <div className="text-sm text-muted-foreground">總支出</div>
-                  </div>
-                  <div className="text-center p-4 bg-blue-50 rounded-lg">
-                    <div className={`text-2xl font-bold ${netCashFlow >= 0 ? "text-green-600" : "text-red-600"}`}>
-                      ${netCashFlow.toLocaleString()}
-                    </div>
-                    <div className="text-sm text-muted-foreground">淨現金流</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          <DemoOverview />
-          <FeatureShowcase />
-        </TabsContent>
 
-        <TabsContent value="income">{analysisResult && <IncomeTable incomes={analysisResult.incomes} />}</TabsContent>
-
-        <TabsContent value="expense">
-          {analysisResult && <ExpenseTable expenses={analysisResult.expenses} />}
-        </TabsContent>
-
-        <TabsContent value="analysis">
-          {analysisResult && <CashFlowAnalysis incomes={analysisResult.incomes} expenses={analysisResult.expenses} />}
-        </TabsContent>
-
-        <TabsContent value="report">
-          {analysisResult && <FinancialReport incomes={analysisResult.incomes} expenses={analysisResult.expenses} />}
-        </TabsContent>
-      </Tabs>
+      </div>
     </div>
   )
 }
