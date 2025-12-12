@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Copy, Check } from "lucide-react"
+import { Copy, Check, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 
 interface Income {
   date: string
@@ -25,9 +25,92 @@ interface IncomeTableProps {
   incomes: Income[]
 }
 
+type SortField = "date" | "weather" | "customerCount" | "category" | "type" | "description" | "unitPrice" | "quantity" | "paymentStatus" | "subtotal" | "customerNote"
+type SortDirection = "asc" | "desc" | null
+
 export default function IncomeTable({ incomes }: IncomeTableProps) {
   const [copied, setCopied] = useState(false)
+  const [sortField, setSortField] = useState<SortField | null>(null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null)
   const totalIncome = incomes.reduce((sum, item) => sum + item.subtotal, 0)
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // 如果點擊同一個欄位，切換排序方向
+      if (sortDirection === "asc") {
+        setSortDirection("desc")
+      } else if (sortDirection === "desc") {
+        setSortDirection(null)
+        setSortField(null)
+      } else {
+        setSortDirection("asc")
+      }
+    } else {
+      // 點擊新欄位，設為升序
+      setSortField(field)
+      setSortDirection("asc")
+    }
+  }
+
+  const sortedIncomes = [...incomes].sort((a, b) => {
+    if (!sortField || !sortDirection) return 0
+
+    let aValue: any
+    let bValue: any
+
+    switch (sortField) {
+      case "date":
+        aValue = new Date(a.date).getTime()
+        bValue = new Date(b.date).getTime()
+        break
+      case "weather":
+        aValue = (a.weather || "").toLowerCase()
+        bValue = (b.weather || "").toLowerCase()
+        break
+      case "customerCount":
+        aValue = a.customerCount ?? 0
+        bValue = b.customerCount ?? 0
+        break
+      case "category":
+        aValue = a.category.toLowerCase()
+        bValue = b.category.toLowerCase()
+        break
+      case "type":
+        aValue = a.type.toLowerCase()
+        bValue = b.type.toLowerCase()
+        break
+      case "description":
+        aValue = a.description.toLowerCase()
+        bValue = b.description.toLowerCase()
+        break
+      case "unitPrice":
+        aValue = a.unitPrice
+        bValue = b.unitPrice
+        break
+      case "quantity":
+        aValue = a.quantity
+        bValue = b.quantity
+        break
+      case "paymentStatus":
+        aValue = a.paymentStatus.toLowerCase()
+        bValue = b.paymentStatus.toLowerCase()
+        break
+      case "subtotal":
+        aValue = a.subtotal
+        bValue = b.subtotal
+        break
+      case "customerNote":
+        aValue = (a.customerNote || "").toLowerCase()
+        bValue = (b.customerNote || "").toLowerCase()
+        break
+      default:
+        return 0
+    }
+
+    if (aValue < bValue) return sortDirection === "asc" ? -1 : 1
+    if (aValue > bValue) return sortDirection === "asc" ? 1 : -1
+    return 0
+  })
 
   const copyToClipboard = () => {
     // 創建表頭
@@ -46,7 +129,7 @@ export default function IncomeTable({ incomes }: IncomeTableProps) {
     ]
 
     // 創建表格內容
-    const rows = incomes.map((income) => [
+    const rows = sortedIncomes.map((income) => [
       income.date,
       income.weather || "",
       income.customerCount?.toString() || "",
@@ -94,21 +177,120 @@ export default function IncomeTable({ incomes }: IncomeTableProps) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>日期</TableHead>
-                <TableHead>天氣</TableHead>
-                <TableHead>來客數</TableHead>
-                <TableHead>分類</TableHead>
-                <TableHead>類別</TableHead>
-                <TableHead>收入內容/說明</TableHead>
-                <TableHead>單價</TableHead>
-                <TableHead>數量</TableHead>
-                <TableHead>收款狀況</TableHead>
-                <TableHead>小計</TableHead>
-                <TableHead>客戶記錄/備註</TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("date")}>
+                    日期
+                    {sortField === "date" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("weather")}>
+                    天氣
+                    {sortField === "weather" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("customerCount")}>
+                    來客數
+                    {sortField === "customerCount" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("category")}>
+                    分類
+                    {sortField === "category" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("type")}>
+                    類別
+                    {sortField === "type" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("description")}>
+                    收入內容/說明
+                    {sortField === "description" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("unitPrice")}>
+                    單價
+                    {sortField === "unitPrice" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("quantity")}>
+                    數量
+                    {sortField === "quantity" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("paymentStatus")}>
+                    收款狀況
+                    {sortField === "paymentStatus" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("subtotal")}>
+                    小計
+                    {sortField === "subtotal" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("customerNote")}>
+                    客戶記錄/備註
+                    {sortField === "customerNote" ? (
+                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                    )}
+                  </Button>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {incomes.map((income, index) => (
+              {sortedIncomes.map((income, index) => (
                 <TableRow key={index}>
                   <TableCell>{income.date}</TableCell>
                   <TableCell>{income.weather || "-"}</TableCell>

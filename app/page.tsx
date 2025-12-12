@@ -439,7 +439,7 @@ export default function MonthlyFinanceAnalyzer() {
           </Card>
 
 
-      </div>
+                </div>
     </div>
   )
 }
