@@ -240,13 +240,13 @@ export default function IncomeTable({ incomes }: IncomeTableProps) {
           <div className="space-y-3">
             {sortedIncomes.map((income, index) => (
               <div key={index} className="rounded-lg border p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-semibold">{income.description}</div>
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-base font-semibold leading-snug break-words">{income.description}</div>
                     <div className="text-xs text-muted-foreground">{income.type}</div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-green-600">${income.subtotal.toLocaleString()}</div>
+                  <div className="w-1/3 text-right">
+                    <div className="text-lg font-bold text-green-600">${income.subtotal.toLocaleString()}</div>
                     <div className="text-xs text-muted-foreground">小計</div>
                   </div>
                 </div>
@@ -256,7 +256,7 @@ export default function IncomeTable({ incomes }: IncomeTableProps) {
                     {income.paymentStatus}
                   </Badge>
                 </div>
-                <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                <dl className="mt-3 grid grid-cols-1 gap-x-3 gap-y-2 text-xs sm:grid-cols-2">
                   <div>
                     <dt className="text-muted-foreground">日期</dt>
                     <dd>{income.date}</dd>
