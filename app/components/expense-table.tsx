@@ -207,21 +207,17 @@ export default function ExpenseTable({ expenses }: ExpenseTableProps) {
           <div className="space-y-3">
             {sortedExpenses.map((expense, index) => (
               <div key={index} className="rounded-lg border p-3">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-base font-semibold leading-snug break-words">{expense.description}</div>
-                    <div className="text-xs text-muted-foreground">{expense.type}</div>
-                  </div>
-                  <div className="w-1/3 text-right">
-                    <div className="text-lg font-bold text-red-600">${expense.subtotal.toLocaleString()}</div>
-                    <div className="text-xs text-muted-foreground">小計</div>
-                  </div>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Badge variant="secondary">{expense.category}</Badge>
-                  <Badge variant="outline">{expense.expenseCategory}</Badge>
-                </div>
-                <dl className="mt-3 grid grid-cols-1 gap-x-3 gap-y-2 text-xs sm:grid-cols-2">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2 space-y-2">
+                    <div>
+                      <div className="text-base font-semibold leading-snug break-words">{expense.description}</div>
+                      <div className="text-xs text-muted-foreground">{expense.type}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="secondary">{expense.category}</Badge>
+                      <Badge variant="outline">{expense.expenseCategory}</Badge>
+                    </div>
+                    <dl className="grid grid-cols-1 gap-x-3 gap-y-2 text-xs sm:grid-cols-2">
                   <div>
                     <dt className="text-muted-foreground">日期</dt>
                     <dd>{expense.date}</dd>
@@ -238,7 +234,13 @@ export default function ExpenseTable({ expenses }: ExpenseTableProps) {
                     <dt className="text-muted-foreground">數量</dt>
                     <dd>{expense.quantity}</dd>
                   </div>
-                </dl>
+                    </dl>
+                  </div>
+                  <div className="col-span-1 flex flex-col items-end justify-center rounded-md bg-muted/30 p-2 text-right">
+                    <div className="text-xs text-muted-foreground">小計</div>
+                    <div className="text-xl font-bold text-red-600 leading-none">${expense.subtotal.toLocaleString()}</div>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
