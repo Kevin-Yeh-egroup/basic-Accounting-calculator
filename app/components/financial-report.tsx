@@ -256,9 +256,14 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex justify-between items-center">
-          財務月報表
-          <Button variant="outline" size="sm" onClick={copyToClipboard} className="flex items-center gap-1">
+        <CardTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <span>財務月報表</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={copyToClipboard}
+            className="flex w-full items-center justify-center gap-1 sm:w-auto"
+          >
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied ? "已複製" : "複製報表"}
           </Button>
@@ -268,8 +273,8 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
         <div className="space-y-8">
           {/* 家庭收入 */}
           <div>
-            <h3 className="font-bold text-lg mb-4">家庭收入</h3>
-            <Table>
+            <h3 className="font-bold text-base sm:text-lg mb-4">家庭收入</h3>
+            <Table className="min-w-[520px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-1/3">項目</TableHead>
@@ -324,8 +329,8 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
 
           {/* 支出 */}
           <div>
-            <h3 className="font-bold text-lg mb-4">支出</h3>
-            <Table>
+            <h3 className="font-bold text-base sm:text-lg mb-4">支出</h3>
+            <Table className="min-w-[520px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-1/6">項目</TableHead>
@@ -446,8 +451,8 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
 
               {/* 營業收入 */}
               <div>
-                <h3 className="font-bold text-lg mb-4">營業收入</h3>
-                <Table>
+                <h3 className="font-bold text-base sm:text-lg mb-4">營業收入</h3>
+                <Table className="min-w-[520px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>項目</TableHead>
@@ -467,8 +472,8 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
 
               {/* 營業支出 */}
               <div>
-                <h3 className="font-bold text-lg mb-4">營業支出</h3>
-                <Table>
+                <h3 className="font-bold text-base sm:text-lg mb-4">營業支出</h3>
+                <Table className="min-w-[520px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-1/4">項目</TableHead>
@@ -524,8 +529,8 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
 
           {/* 收支總結 */}
           <div>
-            <h3 className="font-bold text-lg mb-4">收支總結</h3>
-            <Table>
+            <h3 className="font-bold text-base sm:text-lg mb-4">收支總結</h3>
+            <Table className="min-w-[520px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>項目</TableHead>

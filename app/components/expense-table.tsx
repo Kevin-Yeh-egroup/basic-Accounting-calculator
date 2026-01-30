@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Copy, Check, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 
 interface Expense {
@@ -31,6 +32,17 @@ export default function ExpenseTable({ expenses }: ExpenseTableProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
   const totalExpense = expenses.reduce((sum, item) => sum + item.subtotal, 0)
 
+  const sortFieldOptions: { value: SortField; label: string }[] = [
+    { value: "date", label: "日期" },
+    { value: "category", label: "分類" },
+    { value: "expenseCategory", label: "支出分類" },
+    { value: "type", label: "類別" },
+    { value: "description", label: "支出內容" },
+    { value: "unitPrice", label: "單價" },
+    { value: "quantity", label: "數量" },
+    { value: "subtotal", label: "小計" },
+  ]
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       // 如果點擊同一個欄位，切換排序方向
@@ -47,6 +59,22 @@ export default function ExpenseTable({ expenses }: ExpenseTableProps) {
       setSortField(field)
       setSortDirection("asc")
     }
+  }
+
+  const handleSortFieldChange = (value: string) => {
+    if (value === "none") {
+      setSortField(null)
+      setSortDirection(null)
+      return
+    }
+
+    setSortField(value as SortField)
+    setSortDirection(sortDirection ?? "asc")
+  }
+
+  const handleSortDirectionChange = (value: string) => {
+    if (!sortField) return
+    setSortDirection(value as SortDirection)
   }
 
   const sortedExpenses = [...expenses].sort((a, b) => {
@@ -129,9 +157,9 @@ export default function ExpenseTable({ expenses }: ExpenseTableProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex justify-between items-center">
-          支出明細表
-          <div className="flex items-center gap-2">
+        <CardTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <span>支出明細表</span>
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="text-red-600">
               總計: ${totalExpense.toLocaleString()}
             </Badge>
@@ -143,115 +171,195 @@ export default function ExpenseTable({ expenses }: ExpenseTableProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("date")}>
-                    日期
-                    {sortField === "date" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("category")}>
-                    分類
-                    {sortField === "category" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("expenseCategory")}>
-                    支出分類
-                    {sortField === "expenseCategory" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("type")}>
-                    類別
-                    {sortField === "type" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("description")}>
-                    支出內容
-                    {sortField === "description" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("unitPrice")}>
-                    單價
-                    {sortField === "unitPrice" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("quantity")}>
-                    數量
-                    {sortField === "quantity" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("subtotal")}>
-                    小計
-                    {sortField === "subtotal" ? (
-                      sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
-                    ) : (
-                      <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    )}
-                  </Button>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedExpenses.map((expense, index) => (
-                <TableRow key={index}>
-                  <TableCell>{expense.date}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{expense.category}</Badge>
-                  </TableCell>
-                  <TableCell>{expense.expenseCategory}</TableCell>
-                  <TableCell>{expense.type}</TableCell>
-                  <TableCell>{expense.description}</TableCell>
-                  <TableCell>${expense.unitPrice.toLocaleString()}</TableCell>
-                  <TableCell>{expense.quantity}</TableCell>
-                  <TableCell className="font-semibold text-red-600">${expense.subtotal.toLocaleString()}</TableCell>
+        <div className="md:hidden space-y-3">
+          <div className="rounded-lg border p-3 space-y-2">
+            <div className="text-sm font-medium">排序</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Select value={sortField ?? "none"} onValueChange={handleSortFieldChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="選擇欄位" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">不排序</SelectItem>
+                  {sortFieldOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={sortDirection ?? "asc"}
+                onValueChange={handleSortDirectionChange}
+                disabled={!sortField}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="排序方向" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="asc">升序</SelectItem>
+                  <SelectItem value="desc">降序</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {sortedExpenses.map((expense, index) => (
+              <div key={index} className="rounded-lg border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold">{expense.description}</div>
+                    <div className="text-xs text-muted-foreground">{expense.type}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-semibold text-red-600">${expense.subtotal.toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">小計</div>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant="secondary">{expense.category}</Badge>
+                  <Badge variant="outline">{expense.expenseCategory}</Badge>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                  <div>
+                    <dt className="text-muted-foreground">日期</dt>
+                    <dd>{expense.date}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">類別</dt>
+                    <dd>{expense.type}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">單價</dt>
+                    <dd>${expense.unitPrice.toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">數量</dt>
+                    <dd>{expense.quantity}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+            <span className="font-semibold">總計</span>
+            <span className="font-semibold text-red-600">${totalExpense.toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div className="hidden md:block">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("date")}>
+                      日期
+                      {sortField === "date" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("category")}>
+                      分類
+                      {sortField === "category" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("expenseCategory")}>
+                      支出分類
+                      {sortField === "expenseCategory" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("type")}>
+                      類別
+                      {sortField === "type" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("description")}>
+                      支出內容
+                      {sortField === "description" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("unitPrice")}>
+                      單價
+                      {sortField === "unitPrice" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("quantity")}>
+                      數量
+                      {sortField === "quantity" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
+                  <TableHead>
+                    <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 hover:bg-muted" onClick={() => handleSort("subtotal")}>
+                      小計
+                      {sortField === "subtotal" ? (
+                        sortDirection === "asc" ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                      )}
+                    </Button>
+                  </TableHead>
                 </TableRow>
-              ))}
-              <TableRow>
-                <TableCell colSpan={7} className="text-right font-bold">
-                  總計
-                </TableCell>
-                <TableCell className="font-bold text-red-600">${totalExpense.toLocaleString()}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {sortedExpenses.map((expense, index) => (
+                  <TableRow key={index}>
+                    <TableCell>{expense.date}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{expense.category}</Badge>
+                    </TableCell>
+                    <TableCell>{expense.expenseCategory}</TableCell>
+                    <TableCell>{expense.type}</TableCell>
+                    <TableCell>{expense.description}</TableCell>
+                    <TableCell>${expense.unitPrice.toLocaleString()}</TableCell>
+                    <TableCell>{expense.quantity}</TableCell>
+                    <TableCell className="font-semibold text-red-600">${expense.subtotal.toLocaleString()}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow>
+                  <TableCell colSpan={7} className="text-right font-bold">
+                    總計
+                  </TableCell>
+                  <TableCell className="font-bold text-red-600">${totalExpense.toLocaleString()}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
         </div>
       </CardContent>
     </Card>

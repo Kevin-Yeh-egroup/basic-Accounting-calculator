@@ -137,12 +137,17 @@ export default function CashFlowAnalysis({ incomes, expenses }: CashFlowAnalysis
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="flex justify-between items-center">
+          <CardTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center">
               <PieChart className="w-5 h-5 mr-2" />
               財務分析與現金流評估
             </div>
-            <Button variant="outline" size="sm" onClick={copyAnalysisToClipboard} className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={copyAnalysisToClipboard}
+              className="flex w-full items-center justify-center gap-1 sm:w-auto"
+            >
               {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               {copied ? "已複製" : "複製分析"}
             </Button>

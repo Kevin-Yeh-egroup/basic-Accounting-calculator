@@ -314,7 +314,7 @@ export default function MonthlyFinanceAnalyzer() {
   // 如果正在分析，顯示讀取畫面
   if (isAnalyzing) {
     return (
-      <div className="container mx-auto p-6 max-w-7xl min-h-screen flex items-center justify-center">
+      <div className="container mx-auto px-4 py-6 sm:px-6 max-w-7xl min-h-screen flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <div className="text-center space-y-6">
@@ -362,26 +362,34 @@ export default function MonthlyFinanceAnalyzer() {
   // 如果要顯示結果，顯示結果頁面
   if (showResults && analysisResult) {
     return (
-      <div className="container mx-auto p-6 max-w-7xl">
+      <div className="container mx-auto px-4 py-6 sm:px-6 max-w-7xl">
         <div className="mb-6">
           <Button 
             onClick={handleBackToInput} 
             variant="outline" 
-            className="mb-4"
+            className="mb-4 w-full sm:w-auto"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回輸入畫面
           </Button>
-          <h1 className="text-3xl font-bold mb-2">分析結果</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold mb-2">分析結果</h1>
           <p className="text-muted-foreground">AI已完成您的收支分析，以下是詳細結果</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="income">收入明細</TabsTrigger>
-            <TabsTrigger value="expense">支出明細</TabsTrigger>
-            <TabsTrigger value="analysis">財務分析</TabsTrigger>
-            <TabsTrigger value="report">財務月報</TabsTrigger>
+          <TabsList className="w-full overflow-x-auto flex gap-2 sm:grid sm:grid-cols-4 sm:gap-0">
+            <TabsTrigger value="income" className="flex-shrink-0 px-4 sm:px-3">
+              收入明細
+            </TabsTrigger>
+            <TabsTrigger value="expense" className="flex-shrink-0 px-4 sm:px-3">
+              支出明細
+            </TabsTrigger>
+            <TabsTrigger value="analysis" className="flex-shrink-0 px-4 sm:px-3">
+              財務分析
+            </TabsTrigger>
+            <TabsTrigger value="report" className="flex-shrink-0 px-4 sm:px-3">
+              財務月報
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="income">
@@ -406,9 +414,9 @@ export default function MonthlyFinanceAnalyzer() {
 
   // 預設顯示輸入畫面
   return (
-    <div className="container mx-auto p-6 max-w-7xl">
+    <div className="container mx-auto px-4 py-6 sm:px-6 max-w-7xl">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">月收支分析工具</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold mb-2">月收支分析工具</h1>
         <p className="text-muted-foreground">使用AI智能辨識收入支出，自動生成財務分析報表</p>
       </div>
 
@@ -423,7 +431,7 @@ export default function MonthlyFinanceAnalyzer() {
                 placeholder="例如：今天賣了50杯咖啡，每杯80元，總共4000元。租金15000元，水電費2000元，買咖啡豆花了8000元..."
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                className="min-h-[400px] text-base"
+                className="min-h-[300px] sm:min-h-[400px] text-base"
               />
               <Button onClick={handleAnalyze} disabled={!inputText.trim() || isAnalyzing} className="w-full">
                 {isAnalyzing ? (
