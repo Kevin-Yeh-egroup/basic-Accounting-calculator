@@ -5,11 +5,13 @@ import Link from "next/link"
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
+  BarChart3,
+  CalendarDays,
   CircleAlert,
   FileUp,
   Mic,
   NotebookPen,
+  PieChart as PieChartIcon,
   Plus,
   Save,
   Sparkles,
@@ -19,9 +21,9 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine } from "recharts"
 import CashFlowAnalysis from "./components/cash-flow-analysis"
 import FinancialReport from "./components/financial-report"
 
@@ -31,7 +33,17 @@ type InputMode = "text_single" | "voice_single" | "photo_single" | "bulk_text" |
 type UploadKind = "none" | "image" | "document"
 type OverviewDirectionFilter = "all" | "income" | "expense"
 type ImportJobStatus = "uploaded" | "parsed" | "mapped" | "ready_to_import" | "imported" | "failed"
-type PageStep = "home" | "quick-add" | "confirm" | "overview" | "analysis"
+type PageStep =
+  | "home"
+  | "quick-add"
+  | "confirm"
+  | "overview"
+  | "analysis"
+  | "new-entry"
+  | "stats-detail"
+  | "recurring"
+type StatsDirection = "expense" | "income" | "net"
+type StatsTimeRange = "month" | "6months" | "year" | "custom"
 
 interface TaxonomyCategory {
   category_key: string
@@ -107,6 +119,56 @@ interface TransactionEditDraft {
   note: string
 }
 
+type RecurringFrequency = "weekly" | "monthly" | "yearly"
+
+interface RecurringEntry {
+  id: string
+  title: string
+  amount: number
+  direction: Exclude<Direction, "unknown">
+  category_key: string
+  note: string
+  frequency: RecurringFrequency
+  weekly_day: number
+  monthly_day: number
+  yearly_month: number
+  yearly_day: number
+  start_date: string
+  enabled: boolean
+  auto_record: boolean
+  occurrence_limit: number | null
+  last_auto_processed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface RecurringRecordLog {
+  id: string
+  recurring_id: string
+  occurred_at: string
+  transaction_id: string
+  created_at: string
+  source: "auto" | "manual"
+}
+
+interface RecurringFormState {
+  title: string
+  amount: string
+  direction: Exclude<Direction, "unknown">
+  category_key: string
+  note: string
+  frequency: RecurringFrequency
+  weekly_day: number
+  monthly_day: number
+  yearly_month: number
+  yearly_day: number
+  start_date: string
+  enabled: boolean
+  auto_record: boolean
+  occurrence_mode: "unlimited" | "limited"
+  occurrence_limit: number
+}
+
 interface LegacyIncome {
   date: string
   weather?: string
@@ -161,6 +223,8 @@ const INDEXED_DB_VERSION = 1
 const INDEXED_DB_STORE = "app_state"
 const INDEXED_DB_TX_KEY = "transactions"
 const INDEXED_DB_TEMPLATE_KEY = "import_templates"
+const INDEXED_DB_RECURRING_KEY = "recurring_entries"
+const INDEXED_DB_RECURRING_LOG_KEY = "recurring_record_logs"
 
 let indexedDbPromise: Promise<IDBDatabase> | null = null
 
@@ -225,7 +289,7 @@ const MODE_OPTIONS: Array<{
   },
   {
     mode: "file_import",
-    title: "上傳輸入（照片／試算表／文件／可攜式文件）",
+    title: "上傳輸入（照片／Excel／PDF／Word／PPT）",
     description: "一次上傳，自動切換照片或檔案匯入流程",
     icon: FileUp,
   },
@@ -714,12 +778,56 @@ function formatMonthLabel(monthKey: string): string {
   return `${year} 年 ${Number(month)} 月`
 }
 
+const WEEKDAY_ZH = ["日", "一", "二", "三", "四", "五", "六"]
+const MAX_RECURRING_OCCURRENCES = 36
+const RECURRING_WEEKDAY_OPTIONS = [
+  { value: 1, label: "一" },
+  { value: 2, label: "二" },
+  { value: 3, label: "三" },
+  { value: 4, label: "四" },
+  { value: 5, label: "五" },
+  { value: 6, label: "六" },
+  { value: 0, label: "日" },
+]
+
+function shiftDateByDays(dateString: string, days: number): string {
+  const d = parseYmdDate(dateString)
+  if (!d) return dateString
+  d.setDate(d.getDate() + days)
+  return formatYmd(d.getFullYear(), d.getMonth() + 1, d.getDate())
+}
+
+function formatEntryDateLabel(dateString: string): string {
+  const today = new Date().toISOString().slice(0, 10)
+  const yesterday = shiftDateByDays(today, -1)
+  const tomorrow = shiftDateByDays(today, 1)
+
+  const d = new Date(dateString)
+  if (Number.isNaN(d.getTime())) return dateString
+  const w = WEEKDAY_ZH[d.getDay()]
+  const base = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} 星期${w}`
+
+  if (dateString === today) return `今日 ${base}`
+  if (dateString === yesterday) return `昨日 ${base}`
+  if (dateString === tomorrow) return `明日 ${base}`
+  return base
+}
+
+function formatDateGroup(dateString: string): string {
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return dateString
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, "0")
+  const d = String(date.getDate()).padStart(2, "0")
+  const w = WEEKDAY_ZH[date.getDay()]
+  return `${y}/${m}/${d} 星期${w}`
+}
+
 function shiftMonthKey(monthKey: string, offset: number): string {
   const [yearText, monthText] = monthKey.split("-")
   const year = Number(yearText)
   const month = Number(monthText)
   if (!Number.isFinite(year) || !Number.isFinite(month)) return monthKey
-
   const date = new Date(year, month - 1 + offset, 1)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
 }
@@ -730,10 +838,17 @@ function getFileExt(filename: string): string {
   return parts[parts.length - 1].toLowerCase()
 }
 
+const ALLOWED_IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif"])
+const ALLOWED_DOC_EXTS = new Set(["xlsx", "xls", "csv", "pdf", "doc", "docx", "ppt", "pptx"])
+
 function isImageUploadFile(file: File): boolean {
   const ext = getFileExt(file.name)
-  const imageExts = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif"])
-  return file.type.startsWith("image/") || imageExts.has(ext)
+  return file.type.startsWith("image/") || ALLOWED_IMAGE_EXTS.has(ext)
+}
+
+function isAllowedUploadFile(file: File): boolean {
+  const ext = getFileExt(file.name)
+  return ALLOWED_IMAGE_EXTS.has(ext) || ALLOWED_DOC_EXTS.has(ext) || file.type.startsWith("image/")
 }
 
 function toColumnLabel(columnKey: string): string {
@@ -783,6 +898,47 @@ function formatYmd(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
 }
 
+function parseYmdDate(dateString: string): Date | null {
+  const matched = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!matched) return null
+  const year = Number(matched[1])
+  const month = Number(matched[2])
+  const day = Number(matched[3])
+  const date = new Date(year, month - 1, day)
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null
+  }
+  return date
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate()
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+function normalizeOccurrenceLimit(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null
+  if (!Number.isFinite(value)) return null
+  return clampInteger(value, 1, MAX_RECURRING_OCCURRENCES)
+}
+
+function remainingRecurringOccurrences(rule: RecurringEntry, recordedCount: number): number | null {
+  if (rule.occurrence_limit === null) return null
+  return Math.max(rule.occurrence_limit - recordedCount, 0)
+}
+
+function hasRemainingRecurringOccurrences(rule: RecurringEntry, recordedCount: number): boolean {
+  return remainingRecurringOccurrences(rule, recordedCount) !== 0
+}
+
 function extractDateFromText(text: string): string {
   const full = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/)
   if (full) {
@@ -802,6 +958,64 @@ function extractDateFromText(text: string): string {
   }
 
   return new Date().toISOString().slice(0, 10)
+}
+
+function recurringRuleLabel(rule: RecurringEntry): string {
+  if (rule.frequency === "weekly") {
+    return `每週${WEEKDAY_ZH[rule.weekly_day] ?? "?"}`
+  }
+  if (rule.frequency === "monthly") {
+    return `每月 ${rule.monthly_day} 號`
+  }
+  return `每年 ${rule.yearly_month}/${rule.yearly_day}`
+}
+
+function isRecurringDueOnDate(rule: RecurringEntry, dateString: string): boolean {
+  if (dateString < rule.start_date) return false
+  const date = parseYmdDate(dateString)
+  if (!date) return false
+
+  if (rule.frequency === "weekly") {
+    return date.getDay() === rule.weekly_day
+  }
+
+  if (rule.frequency === "monthly") {
+    const dueDay = Math.min(rule.monthly_day, daysInMonth(date.getFullYear(), date.getMonth() + 1))
+    return date.getDate() === dueDay
+  }
+
+  if (date.getMonth() + 1 !== rule.yearly_month) return false
+  const dueDay = Math.min(rule.yearly_day, daysInMonth(date.getFullYear(), rule.yearly_month))
+  return date.getDate() === dueDay
+}
+
+function collectRecurringDueDates(rule: RecurringEntry, startDate: string, endDate: string): string[] {
+  if (startDate > endDate) return []
+
+  const dueDates: string[] = []
+  let cursor = startDate < rule.start_date ? rule.start_date : startDate
+
+  for (let guard = 0; guard < 2000 && cursor <= endDate; guard += 1) {
+    if (isRecurringDueOnDate(rule, cursor)) {
+      dueDates.push(cursor)
+    }
+    const nextCursor = shiftDateByDays(cursor, 1)
+    if (nextCursor === cursor) break
+    cursor = nextCursor
+  }
+
+  return dueDates
+}
+
+function findNextRecurringDueDate(rule: RecurringEntry, fromDate: string): string | null {
+  let cursor = fromDate < rule.start_date ? rule.start_date : fromDate
+  for (let guard = 0; guard < 800; guard += 1) {
+    if (isRecurringDueOnDate(rule, cursor)) return cursor
+    const nextCursor = shiftDateByDays(cursor, 1)
+    if (nextCursor === cursor) break
+    cursor = nextCursor
+  }
+  return null
 }
 
 function inferDirection(text: string, amount: number | null): Direction {
@@ -1250,6 +1464,7 @@ export default function MvpAccountingPage() {
   const [drafts, setDrafts] = useState<DraftTransaction[]>([])
   const [importJob, setImportJob] = useState<ImportJob | null>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const entryDateInputRef = useRef<HTMLInputElement | null>(null)
 
   const [singleText, setSingleText] = useState("")
   const [isSpeechSupported, setIsSpeechSupported] = useState(false)
@@ -1262,20 +1477,28 @@ export default function MvpAccountingPage() {
   const [photoNote, setPhotoNote] = useState("")
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [previewRows, setPreviewRows] = useState<string[][]>([])
   const [fileColumns, setFileColumns] = useState<string[]>(["col_1"])
   const [fileMapping, setFileMapping] = useState<FileMapping>(DEFAULT_MAPPING)
   const [templateMap, setTemplateMap] = useState<Record<string, FileMapping>>({})
   const [isFileParsing, setIsFileParsing] = useState(false)
+  const [fileImportTab, setFileImportTab] = useState<"expense" | "income">("expense")
 
-  const [batchCategory, setBatchCategory] = useState("")
-  const [batchDomain, setBatchDomain] = useState<Domain>("unknown")
-  const [batchDirection, setBatchDirection] = useState<Direction>("unknown")
+  const [entryDirection, setEntryDirection] = useState<Exclude<Direction, "unknown">>("expense")
+  const [entryCategory, setEntryCategory] = useState("")
+  const [entryCalcDisplay, setEntryCalcDisplay] = useState("0")
+  const [entryNote, setEntryNote] = useState("")
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10))
+  const [entryAdvancedMode, setEntryAdvancedMode] = useState<"none" | "text" | "file">("none")
+  const [entryEditingId, setEntryEditingId] = useState<string | null>(null)
 
   const [dreamTarget, setDreamTarget] = useState(200000)
   const [dreamSaved, setDreamSaved] = useState(20000)
   const [dreamDeadline, setDreamDeadline] = useState(defaultDreamDeadline)
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
+  const [pickerYear, setPickerYear] = useState(() => Number(new Date().toISOString().slice(0, 4)))
 
   const [banner, setBanner] = useState<string | null>(null)
   const [storageReady, setStorageReady] = useState(false)
@@ -1284,14 +1507,48 @@ export default function MvpAccountingPage() {
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<TransactionEditDraft | null>(null)
 
+  const [statsDetailDirection, setStatsDetailDirection] = useState<StatsDirection>("expense")
+  const [statsTimeRange, setStatsTimeRange] = useState<StatsTimeRange>("month")
+  const [statsCustomStart, setStatsCustomStart] = useState("")
+  const [statsCustomEnd, setStatsCustomEnd] = useState("")
+  const [statsYear, setStatsYear] = useState(() => new Date().getFullYear())
+  const [statsViewMode, setStatsViewMode] = useState<"chart" | "calendar">("chart")
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [homeViewMode, setHomeViewMode] = useState<"chart" | "calendar">("chart")
+  const [recurringEntries, setRecurringEntries] = useState<RecurringEntry[]>([])
+  const [recurringRecordLogs, setRecurringRecordLogs] = useState<RecurringRecordLog[]>([])
+  const [recurringEditingId, setRecurringEditingId] = useState<string | null>(null)
+  const [recurringForm, setRecurringForm] = useState<RecurringFormState>(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    return {
+      title: "",
+      amount: "",
+      direction: "expense",
+      category_key: "life_expense_other",
+      note: "",
+      frequency: "monthly",
+      weekly_day: 1,
+      monthly_day: 1,
+      yearly_month: 1,
+      yearly_day: 1,
+      start_date: today,
+      enabled: true,
+      auto_record: true,
+      occurrence_mode: "unlimited",
+      occurrence_limit: 12,
+    }
+  })
+
   useEffect(() => {
     let cancelled = false
 
     async function hydrateFromIndexedDb() {
       try {
-        const [storedTransactions, storedTemplates] = await Promise.all([
+        const [storedTransactions, storedTemplates, storedRecurringEntries, storedRecurringLogs] = await Promise.all([
           readIndexedDbValue<Transaction[]>(INDEXED_DB_TX_KEY),
           readIndexedDbValue<Record<string, FileMapping>>(INDEXED_DB_TEMPLATE_KEY),
+          readIndexedDbValue<RecurringEntry[]>(INDEXED_DB_RECURRING_KEY),
+          readIndexedDbValue<RecurringRecordLog[]>(INDEXED_DB_RECURRING_LOG_KEY),
         ])
 
         if (cancelled) return
@@ -1320,6 +1577,19 @@ export default function MvpAccountingPage() {
               await writeIndexedDbValue(INDEXED_DB_TEMPLATE_KEY, legacyTemplates)
             }
           }
+        }
+
+        if (Array.isArray(storedRecurringEntries)) {
+          setRecurringEntries(
+            storedRecurringEntries.map(item => ({
+              ...item,
+              occurrence_limit: normalizeOccurrenceLimit(item.occurrence_limit),
+            }))
+          )
+        }
+
+        if (Array.isArray(storedRecurringLogs)) {
+          setRecurringRecordLogs(storedRecurringLogs)
         }
       } catch {
         if (!cancelled) {
@@ -1352,6 +1622,118 @@ export default function MvpAccountingPage() {
       setBanner(previous => previous ?? "欄位模板寫入失敗，請稍後再試。")
     })
   }, [templateMap, storageReady])
+
+  useEffect(() => {
+    if (!storageReady) return
+    void writeIndexedDbValue(INDEXED_DB_RECURRING_KEY, recurringEntries).catch(() => {
+      setBanner(previous => previous ?? "固定收支設定寫入失敗，請稍後再試。")
+    })
+  }, [recurringEntries, storageReady])
+
+  useEffect(() => {
+    if (!storageReady) return
+    void writeIndexedDbValue(INDEXED_DB_RECURRING_LOG_KEY, recurringRecordLogs).catch(() => {
+      setBanner(previous => previous ?? "固定收支記錄寫入失敗，請稍後再試。")
+    })
+  }, [recurringRecordLogs, storageReady])
+
+  useEffect(() => {
+    if (!storageReady || recurringEntries.length === 0) return
+
+    const today = new Date().toISOString().slice(0, 10)
+    const knownLogKeys = new Set(recurringRecordLogs.map(log => `${log.recurring_id}::${log.occurred_at}`))
+    const recordedCountById = recurringRecordLogs.reduce((map, log) => {
+      map.set(log.recurring_id, (map.get(log.recurring_id) ?? 0) + 1)
+      return map
+    }, new Map<string, number>())
+    const logsToAppend: RecurringRecordLog[] = []
+    const transactionsToAppend: Transaction[] = []
+    const nowIso = new Date().toISOString()
+    let shouldPatchEntries = false
+
+    const nextEntries = recurringEntries.map(entry => {
+      if (!entry.enabled || !entry.auto_record) return entry
+
+      let recordedCount = recordedCountById.get(entry.id) ?? 0
+      if (!hasRemainingRecurringOccurrences(entry, recordedCount)) {
+        return entry
+      }
+
+      const startCursorCandidate = entry.last_auto_processed_at
+        ? shiftDateByDays(entry.last_auto_processed_at, 1)
+        : entry.start_date
+      const startCursor = startCursorCandidate < entry.start_date ? entry.start_date : startCursorCandidate
+      let createdCountForEntry = 0
+
+      if (startCursor <= today) {
+        const dueDates = collectRecurringDueDates(entry, startCursor, today)
+        const category = CATEGORY_BY_KEY.get(entry.category_key)
+        if (category) {
+          for (const dueDate of dueDates) {
+            if (!hasRemainingRecurringOccurrences(entry, recordedCount)) {
+              break
+            }
+            const logKey = `${entry.id}::${dueDate}`
+            if (knownLogKeys.has(logKey)) continue
+
+            const txId = uid("tx")
+            transactionsToAppend.push({
+              id: txId,
+              user_id: DEMO_USER_ID,
+              occurred_at: dueDate,
+              amount: entry.amount,
+              direction: entry.direction,
+              domain: category.domain,
+              category_key: category.category_key,
+              note: entry.note.trim() || `${entry.title}（固定收支）`,
+              input_mode: "text_single",
+              ai_predicted_category_key: category.category_key,
+              ai_confidence: 1,
+              user_overridden: false,
+            })
+            logsToAppend.push({
+              id: uid("rlog"),
+              recurring_id: entry.id,
+              occurred_at: dueDate,
+              transaction_id: txId,
+              created_at: nowIso,
+              source: "auto",
+            })
+            knownLogKeys.add(logKey)
+            recordedCount += 1
+            createdCountForEntry += 1
+            recordedCountById.set(entry.id, recordedCount)
+          }
+        }
+      }
+
+      if (
+        entry.last_auto_processed_at !== today &&
+        (createdCountForEntry > 0 || hasRemainingRecurringOccurrences(entry, recordedCount))
+      ) {
+        shouldPatchEntries = true
+        return {
+          ...entry,
+          last_auto_processed_at: today,
+          updated_at: nowIso,
+        }
+      }
+      return entry
+    })
+
+    if (transactionsToAppend.length > 0) {
+      setTransactions(previous => [...transactionsToAppend, ...previous])
+      setBanner(`固定收支到期已自動記帳 ${transactionsToAppend.length} 筆。`)
+    }
+
+    if (logsToAppend.length > 0) {
+      setRecurringRecordLogs(previous => [...logsToAppend, ...previous])
+    }
+
+    if (shouldPatchEntries) {
+      setRecurringEntries(nextEntries)
+    }
+  }, [recurringEntries, recurringRecordLogs, storageReady])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -1519,6 +1901,32 @@ export default function MvpAccountingPage() {
     dreamPlan.targetLeft === 0 ? "已完成" : `${formatMoney(monthContribution)} / ${formatMoney(dreamPlan.shouldSavePerMonth)}`
 
   const recentTransactions = sortedCurrentMonthTransactions.slice(0, 3)
+
+  const groupedByDate = useMemo(() => {
+    const groups: { date: string; label: string; transactions: Transaction[]; dayExpense: number }[] = []
+    const map = new Map<string, Transaction[]>()
+    for (const tx of sortedCurrentMonthTransactions) {
+      const key = tx.occurred_at
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(tx)
+    }
+    for (const [date, txList] of map) {
+      const dayExpense = txList.filter(t => t.direction === "expense").reduce((s, t) => s + t.amount, 0)
+      groups.push({ date, label: formatDateGroup(date), transactions: txList, dayExpense })
+    }
+    return groups
+  }, [sortedCurrentMonthTransactions])
+
+  const donutData = useMemo(() => {
+    if (monthIncome === 0 && monthExpense === 0) {
+      return [{ name: "無資料", value: 1, color: "#475569" }]
+    }
+    return [
+      { name: "收入", value: monthIncome, color: "#34d399" },
+      { name: "支出", value: monthExpense, color: "#fb7185" },
+    ]
+  }, [monthIncome, monthExpense])
+
   const overviewFilterStats = useMemo(
     () => ({
       all: sortedTransactions.length,
@@ -1548,6 +1956,82 @@ export default function MvpAccountingPage() {
     })
   }, [sortedTransactions, overviewQuery, overviewDirectionFilter])
   const analysisData = useMemo(() => toLegacyAnalysisData(sortedTransactions), [sortedTransactions])
+  const recurringCategories = useMemo(() => {
+    const filtered = TAXONOMY.filter(item => item.direction === recurringForm.direction)
+    filtered.sort((a, b) => {
+      if (a.domain === b.domain) return 0
+      return a.domain === "life" ? -1 : 1
+    })
+    return filtered
+  }, [recurringForm.direction])
+  const recurringRecordedCountById = useMemo(() => {
+    const map = new Map<string, number>()
+    recurringRecordLogs.forEach(log => {
+      map.set(log.recurring_id, (map.get(log.recurring_id) ?? 0) + 1)
+    })
+    return map
+  }, [recurringRecordLogs])
+  const recurringSummary = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    const activeEntries = recurringEntries.filter(item => item.enabled)
+    const activeWithRemaining = activeEntries.filter(item =>
+      hasRemainingRecurringOccurrences(item, recurringRecordedCountById.get(item.id) ?? 0)
+    )
+    return {
+      total: recurringEntries.length,
+      active: activeEntries.length,
+      active_with_remaining: activeWithRemaining.length,
+      auto: activeWithRemaining.filter(item => item.auto_record).length,
+      dueToday: activeWithRemaining.filter(item => isRecurringDueOnDate(item, today)).length,
+    }
+  }, [recurringEntries, recurringRecordedCountById])
+  const latestRecurringLogById = useMemo(() => {
+    const sortedLogs = [...recurringRecordLogs].sort((a, b) => {
+      if (a.occurred_at !== b.occurred_at) {
+        return b.occurred_at.localeCompare(a.occurred_at)
+      }
+      return b.created_at.localeCompare(a.created_at)
+    })
+    const map = new Map<string, RecurringRecordLog>()
+    sortedLogs.forEach(log => {
+      if (!map.has(log.recurring_id)) {
+        map.set(log.recurring_id, log)
+      }
+    })
+    return map
+  }, [recurringRecordLogs])
+
+  useEffect(() => {
+    if (recurringCategories.length === 0) return
+    if (recurringCategories.some(item => item.category_key === recurringForm.category_key)) return
+    setRecurringForm(previous => ({
+      ...previous,
+      category_key: recurringCategories[0].category_key,
+    }))
+  }, [recurringCategories, recurringForm.category_key])
+
+  function resetRecurringForm(direction: Exclude<Direction, "unknown"> = recurringForm.direction) {
+    const today = new Date().toISOString().slice(0, 10)
+    const fallbackCategory = direction === "income" ? "life_income_other" : "life_expense_other"
+    setRecurringEditingId(null)
+    setRecurringForm({
+      title: "",
+      amount: "",
+      direction,
+      category_key: fallbackCategory,
+      note: "",
+      frequency: "monthly",
+      weekly_day: 1,
+      monthly_day: 1,
+      yearly_month: 1,
+      yearly_day: 1,
+      start_date: today,
+      enabled: true,
+      auto_record: true,
+      occurrence_mode: "unlimited",
+      occurrence_limit: 12,
+    })
+  }
 
   function resetQuickInputs() {
     recognitionRef.current?.stop()
@@ -1560,9 +2044,11 @@ export default function MvpAccountingPage() {
     setPhotoAmount("")
     setPhotoNote("")
     setUploadedFile(null)
+    setUploadedFiles([])
     setPreviewRows([])
     setFileColumns(["col_1"])
     setFileMapping(DEFAULT_MAPPING)
+    setFileImportTab("expense")
     setImportJob(null)
   }
 
@@ -1598,74 +2084,61 @@ export default function MvpAccountingPage() {
     resetQuickInputs()
   }
 
-  async function handleFilePicked(file: File | null) {
-    setUploadedFile(file)
+  function handleFilesPicked(files: File[]) {
+    setUploadedFiles(files)
+    setUploadedFile(files[0] ?? null)
     setPreviewRows([])
     setImportJob(null)
     setShowMappingSettings(false)
     setFileColumns(["col_1"])
     setFileMapping(DEFAULT_MAPPING)
-    if (!file) {
+
+    if (files.length === 0) {
       setUploadKind("none")
+      setDrafts([])
+      return
+    }
+
+    const unsupportedFiles = files.filter(file => !isAllowedUploadFile(file))
+    if (unsupportedFiles.length > 0) {
+      const extList = [...new Set(unsupportedFiles.map(file => getFileExt(file.name).toUpperCase()))].join("、")
+      setUploadedFiles([])
+      setUploadedFile(null)
+      setUploadKind("none")
+      setDrafts([])
+      setBanner(`不支援此檔案格式（${extList}），請上傳圖片、Excel、PDF、Word 或 PPT。`)
       return
     }
 
     setBanner(null)
-    if (isImageUploadFile(file)) {
-      setUploadKind("image")
-      setIsFileParsing(false)
-      return
-    }
-
     setUploadKind("document")
     setIsFileParsing(true)
 
-    const ext = getFileExt(file.name)
-    const jobId = uid("job")
+    const generatedCount = Math.min(Math.max(files.length * 4, 4), 40)
+    const generatedDrafts = generateRandomDrafts(generatedCount).map((draft, index) => ({
+      ...draft,
+      source_file_id: files[index % files.length]?.name ?? "",
+    }))
+
+    setDrafts(generatedDrafts)
     setImportJob({
-      job_id: jobId,
+      job_id: uid("job"),
       user_id: DEMO_USER_ID,
       input_mode: "file_import",
-      status: "uploaded",
+      status: "ready_to_import",
       errors: [],
-      stats: { total_lines: 0, success_lines: 0, needs_manual_lines: 0 },
+      stats: {
+        total_lines: generatedDrafts.length,
+        success_lines: generatedDrafts.length,
+        needs_manual_lines: 0,
+      },
     })
+    setFileImportTab("expense")
+    setIsFileParsing(false)
+  }
 
-    try {
-      const fileText = await file.text()
-      const rows = extractRowsFromFileText(fileText)
-      const safeRows = rows.length > 0 ? rows : [[`${file.name} 匯入完成，請手動補上描述與金額`]]
-      const maxCols = Math.max(...safeRows.map(row => row.length), 1)
-      const columns = Array.from({ length: maxCols }, (_, idx) => `col_${idx + 1}`)
-      const remembered = templateMap[ext]
-
-      setPreviewRows(safeRows)
-      setFileColumns(columns)
-      setFileMapping(remembered ?? defaultMappingFromRows(safeRows))
-      setImportJob({
-        job_id: jobId,
-        user_id: DEMO_USER_ID,
-        input_mode: "file_import",
-        status: "parsed",
-        errors: rows.length === 0 ? ["內容抽取不足，請確認欄位或手動修正"] : [],
-        stats: {
-          total_lines: safeRows.length,
-          success_lines: rows.length,
-          needs_manual_lines: rows.length === 0 ? safeRows.length : 0,
-        },
-      })
-    } catch {
-      setImportJob({
-        job_id: jobId,
-        user_id: DEMO_USER_ID,
-        input_mode: "file_import",
-        status: "failed",
-        errors: ["檔案讀取失敗，請重新上傳"],
-        stats: { total_lines: 0, success_lines: 0, needs_manual_lines: 0 },
-      })
-    } finally {
-      setIsFileParsing(false)
-    }
+  function handleFilePicked(file: File | null) {
+    handleFilesPicked(file ? [file] : [])
   }
 
   function buildSingleDraft(): DraftTransaction[] {
@@ -1696,15 +2169,69 @@ export default function MvpAccountingPage() {
     return buildDraftsFromMappedRows(previewRows, fileMapping, uploadedFile.name, "file_import")
   }
 
-  function handleParseInput() {
+  function generateRandomDrafts(count: number): DraftTransaction[] {
+    const expenseCategories = TAXONOMY.filter(c => c.direction === "expense")
+    const incomeCategories = TAXONOMY.filter(c => c.direction === "income")
+
+    const expenseNotes = [
+      "午餐 便當", "超商 飲料", "計程車", "加油", "早餐 三明治",
+      "晚餐 火鍋", "日用品 衛生紙", "手機月費", "水電瓦斯", "咖啡",
+      "文具用品", "停車費", "電影票", "網購 衣服", "保險費",
+      "藥局 感冒藥", "理髮", "書籍", "寵物飼料", "禮物",
+    ]
+    const incomeNotes = [
+      "薪資入帳", "接案收入", "獎金", "退款", "利息收入",
+      "二手出售", "紅包", "股利", "兼職收入", "稿費",
+    ]
+
+    const today = new Date()
+    const y = today.getFullYear()
+    const m = today.getMonth()
+
+    return Array.from({ length: count }, () => {
+      const isIncome = Math.random() < 0.25
+      const pool = isIncome ? incomeCategories : expenseCategories
+      const cat = pool[Math.floor(Math.random() * pool.length)]
+      const notes = isIncome ? incomeNotes : expenseNotes
+      const note = notes[Math.floor(Math.random() * notes.length)]
+      const amount = isIncome
+        ? Math.round((Math.random() * 15000 + 1000) / 100) * 100
+        : Math.round((Math.random() * 1500 + 30) / 10) * 10
+
+      const dayOffset = Math.floor(Math.random() * 28)
+      const d = new Date(y, m, today.getDate() - dayOffset)
+      const dateStr = d.toISOString().slice(0, 10)
+
+      return {
+        id: uid("draft"),
+        user_id: DEMO_USER_ID,
+        occurred_at: dateStr,
+        amount,
+        direction: cat.direction,
+        domain: cat.domain,
+        category_key: cat.category_key,
+        note,
+        input_mode: "file_import" as InputMode,
+        ai_predicted_category_key: cat.category_key,
+        ai_confidence: +(Math.random() * 0.35 + 0.6).toFixed(2),
+        user_overridden: false,
+        source_file_id: "",
+        raw_line: note,
+        selected: true,
+      }
+    })
+  }
+
+  function handleParseInput(parseModeOverride?: InputMode) {
     setBanner(null)
     if (isListening) {
       recognitionRef.current?.stop()
       setIsListening(false)
     }
 
+    const parseMode = parseModeOverride ?? activeMode
     let parsed: DraftTransaction[] = []
-    if (activeMode === "text_single") {
+    if (parseMode === "text_single") {
       const sourceText = singleText.trim()
       if (shouldParseAsBulkText(sourceText)) {
         parsed = buildBulkDrafts(sourceText)
@@ -1724,7 +2251,7 @@ export default function MvpAccountingPage() {
         parsed = buildSingleDraft()
         setImportJob(null)
       }
-    } else if (activeMode === "file_import") {
+    } else if (parseMode === "file_import") {
       if (uploadKind === "image") {
         parsed = buildPhotoDraft()
         setImportJob(null)
@@ -1758,37 +2285,32 @@ export default function MvpAccountingPage() {
     setDrafts(prev => prev.map((item, itemIndex) => (itemIndex === index ? updater(item) : item)))
   }
 
-  function applyBatchSettings() {
-    setDrafts(prev =>
-      prev.map(item => {
-        if (!item.selected) return item
-        const next = { ...item }
-
-        if (batchCategory) {
-          const category = CATEGORY_BY_KEY.get(batchCategory)
-          if (category) {
-            next.category_key = category.category_key
-            next.domain = category.domain
-            next.direction = category.direction
-            next.user_overridden = next.ai_predicted_category_key !== category.category_key
-          }
-        }
-
-        if (batchDomain !== "unknown") {
-          next.domain = batchDomain
-        }
-        if (batchDirection !== "unknown") {
-          next.direction = batchDirection
-        }
-        return next
-      })
-    )
-  }
-
   function saveDrafts() {
-    const validDrafts = drafts.filter(item => item.selected && !item.parse_error && item.amount > 0)
+    const missingAmountIndex = drafts.findIndex(item => item.amount <= 0)
+    if (missingAmountIndex !== -1) {
+      setBanner("有交易尚未填寫金額，請補齊後再送出。")
+      const amountEl = document.querySelector<HTMLInputElement>(`[data-draft-amount="${missingAmountIndex}"]`)
+      if (amountEl) {
+        amountEl.scrollIntoView({ behavior: "smooth", block: "center" })
+        setTimeout(() => amountEl.focus(), 300)
+      }
+      return
+    }
+
+    const missingDateIndex = drafts.findIndex(item => !item.occurred_at)
+    if (missingDateIndex !== -1) {
+      setBanner("有交易尚未填寫日期，請補齊後再送出。")
+      const el = document.querySelector<HTMLInputElement>(`[data-draft-date="${missingDateIndex}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        setTimeout(() => el.focus(), 300)
+      }
+      return
+    }
+
+    const validDrafts = drafts.filter(item => !item.parse_error && item.amount > 0)
     if (validDrafts.length === 0) {
-      setBanner("沒有可儲存的交易，請先勾選並補齊金額。")
+      setBanner("沒有可儲存的交易，請先補齊必填欄位。")
       return
     }
 
@@ -1889,187 +2411,288 @@ export default function MvpAccountingPage() {
     setBanner("已刪除這筆交易。")
   }
 
-  function renderHome() {
-    return (
-      <div className="space-y-4">
-        <Card className="border-indigo-400/30 bg-slate-900/70">
-          <CardHeader className="pb-2 sm:pb-3">
-            <CardTitle className="text-white text-lg sm:text-xl">每月統計總覽</CardTitle>
-            <CardDescription className="text-slate-300 text-xs sm:text-sm">一眼掌握當月收入、支出與現金流</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] min-w-[44px] shrink-0"
-                onClick={() => setSelectedMonth(previous => shiftMonthKey(previous, -1))}
-                aria-label="上個月"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
+  function startEditRecurring(rule: RecurringEntry) {
+    const normalizedLimit = normalizeOccurrenceLimit(rule.occurrence_limit)
+    setRecurringEditingId(rule.id)
+    setRecurringForm({
+      title: rule.title,
+      amount: String(rule.amount),
+      direction: rule.direction,
+      category_key: rule.category_key,
+      note: rule.note,
+      frequency: rule.frequency,
+      weekly_day: rule.weekly_day,
+      monthly_day: rule.monthly_day,
+      yearly_month: rule.yearly_month,
+      yearly_day: rule.yearly_day,
+      start_date: rule.start_date,
+      enabled: rule.enabled,
+      auto_record: rule.auto_record,
+      occurrence_mode: normalizedLimit === null ? "unlimited" : "limited",
+      occurrence_limit: normalizedLimit ?? 12,
+    })
+    setStep("recurring")
+    setBanner(null)
+  }
 
-              <label className="relative flex-1 flex items-center justify-center min-h-[44px] rounded-md border border-white/20 bg-slate-950/60 cursor-pointer hover:bg-slate-950/40 transition-colors">
-                <span className="text-sm sm:text-base font-medium text-white pointer-events-none select-none">
+  function saveRecurringSetting() {
+    const amountValue = parseNumber(recurringForm.amount)
+    if (amountValue === null || amountValue <= 0) {
+      setBanner("請輸入固定收支金額（需大於 0）。")
+      return
+    }
+
+    const category = CATEGORY_BY_KEY.get(recurringForm.category_key)
+    if (!category || category.direction !== recurringForm.direction) {
+      setBanner("固定收支類別無效，請重新選擇。")
+      return
+    }
+
+    const normalizedTitle = recurringForm.title.trim() || category.display_name_zh
+    const normalizedNote = recurringForm.note.trim() || normalizedTitle
+    const normalizedWeeklyDay = clampInteger(recurringForm.weekly_day, 0, 6)
+    const normalizedMonthlyDay = clampInteger(recurringForm.monthly_day, 1, 31)
+    const normalizedYearlyMonth = clampInteger(recurringForm.yearly_month, 1, 12)
+    const normalizedYearlyDay = clampInteger(recurringForm.yearly_day, 1, 31)
+    const normalizedOccurrenceLimit =
+      recurringForm.occurrence_mode === "limited"
+        ? clampInteger(recurringForm.occurrence_limit, 1, MAX_RECURRING_OCCURRENCES)
+        : null
+    const normalizedStartDate = parseYmdDate(recurringForm.start_date)
+      ? recurringForm.start_date
+      : new Date().toISOString().slice(0, 10)
+    const nowIso = new Date().toISOString()
+    const recheckFrom = shiftDateByDays(new Date().toISOString().slice(0, 10), -1)
+    const currentRecordedCount = recurringEditingId ? (recurringRecordedCountById.get(recurringEditingId) ?? 0) : 0
+    const hasRemainingAfterSave =
+      normalizedOccurrenceLimit === null || currentRecordedCount < normalizedOccurrenceLimit
+    const shouldAutoCheck = recurringForm.enabled && recurringForm.auto_record && hasRemainingAfterSave
+
+    if (recurringEditingId) {
+      setRecurringEntries(previous =>
+        previous.map(item => {
+          if (item.id !== recurringEditingId) return item
+          return {
+            ...item,
+            title: normalizedTitle,
+            amount: Math.round(Math.abs(amountValue)),
+            direction: recurringForm.direction,
+            category_key: category.category_key,
+            note: normalizedNote,
+            frequency: recurringForm.frequency,
+            weekly_day: normalizedWeeklyDay,
+            monthly_day: normalizedMonthlyDay,
+            yearly_month: normalizedYearlyMonth,
+            yearly_day: normalizedYearlyDay,
+            start_date: normalizedStartDate,
+            enabled: recurringForm.enabled,
+            auto_record: recurringForm.auto_record,
+            occurrence_limit: normalizedOccurrenceLimit,
+            last_auto_processed_at: shouldAutoCheck ? recheckFrom : item.last_auto_processed_at,
+            updated_at: nowIso,
+          }
+        })
+      )
+      setBanner("已更新固定收支設定。")
+    } else {
+      const newRule: RecurringEntry = {
+        id: uid("rec"),
+        title: normalizedTitle,
+        amount: Math.round(Math.abs(amountValue)),
+        direction: recurringForm.direction,
+        category_key: category.category_key,
+        note: normalizedNote,
+        frequency: recurringForm.frequency,
+        weekly_day: normalizedWeeklyDay,
+        monthly_day: normalizedMonthlyDay,
+        yearly_month: normalizedYearlyMonth,
+        yearly_day: normalizedYearlyDay,
+        start_date: normalizedStartDate,
+        enabled: recurringForm.enabled,
+        auto_record: recurringForm.auto_record,
+        occurrence_limit: normalizedOccurrenceLimit,
+        last_auto_processed_at: shouldAutoCheck ? recheckFrom : null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      }
+      setRecurringEntries(previous => [newRule, ...previous])
+      setBanner("已新增固定收支設定。")
+    }
+
+    resetRecurringForm(recurringForm.direction)
+  }
+
+  function removeRecurringRule(ruleId: string) {
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm("確定要刪除這筆固定收支設定嗎？")
+      if (!confirmed) return
+    }
+
+    setRecurringEntries(previous => previous.filter(item => item.id !== ruleId))
+    setRecurringRecordLogs(previous => previous.filter(log => log.recurring_id !== ruleId))
+    if (recurringEditingId === ruleId) {
+      resetRecurringForm()
+    }
+    setBanner("已刪除固定收支設定。")
+  }
+
+  function toggleRecurringRuleEnabled(ruleId: string) {
+    const today = new Date().toISOString().slice(0, 10)
+    let message = ""
+    setRecurringEntries(previous =>
+      previous.map(item => {
+        if (item.id !== ruleId) return item
+        const nextEnabled = !item.enabled
+        const hasRemaining = hasRemainingRecurringOccurrences(item, recurringRecordedCountById.get(item.id) ?? 0)
+        message = nextEnabled
+          ? hasRemaining
+            ? "已啟用固定收支設定。"
+            : "已啟用固定收支設定（已達次數上限）。"
+          : "已停用固定收支設定。"
+        return {
+          ...item,
+          enabled: nextEnabled,
+          last_auto_processed_at:
+            nextEnabled && item.auto_record && hasRemaining ? shiftDateByDays(today, -1) : item.last_auto_processed_at,
+          updated_at: new Date().toISOString(),
+        }
+      })
+    )
+    if (message) setBanner(message)
+  }
+
+  function toggleRecurringRuleAutoRecord(ruleId: string) {
+    const today = new Date().toISOString().slice(0, 10)
+    let message = ""
+    setRecurringEntries(previous =>
+      previous.map(item => {
+        if (item.id !== ruleId) return item
+        const nextAutoRecord = !item.auto_record
+        const hasRemaining = hasRemainingRecurringOccurrences(item, recurringRecordedCountById.get(item.id) ?? 0)
+        message = nextAutoRecord
+          ? hasRemaining
+            ? "已開啟到期自動記帳。"
+            : "已開啟到期自動記帳（已達次數上限）。"
+          : "已關閉到期自動記帳。"
+        return {
+          ...item,
+          auto_record: nextAutoRecord,
+          last_auto_processed_at:
+            nextAutoRecord && item.enabled && hasRemaining ? shiftDateByDays(today, -1) : item.last_auto_processed_at,
+          updated_at: new Date().toISOString(),
+        }
+      })
+    )
+    if (message) setBanner(message)
+  }
+
+  function recordRecurringNow(rule: RecurringEntry) {
+    const category = CATEGORY_BY_KEY.get(rule.category_key)
+    if (!category) {
+      setBanner("固定收支類別不存在，請先重新設定此項目。")
+      return
+    }
+
+    const today = new Date().toISOString().slice(0, 10)
+    const existingTodayLog = recurringRecordLogs.some(item => item.recurring_id === rule.id && item.occurred_at === today)
+    if (existingTodayLog) {
+      setBanner("今天已記錄過這筆固定收支。")
+      return
+    }
+
+    const recordedCount = recurringRecordedCountById.get(rule.id) ?? 0
+    if (!hasRemainingRecurringOccurrences(rule, recordedCount)) {
+      setBanner(`此固定收支已達設定次數上限（${rule.occurrence_limit} 次）。`)
+      return
+    }
+
+    const transactionId = uid("tx")
+
+    setTransactions(previous => [
+      {
+        id: transactionId,
+        user_id: DEMO_USER_ID,
+        occurred_at: today,
+        amount: rule.amount,
+        direction: rule.direction,
+        domain: category.domain,
+        category_key: category.category_key,
+        note: rule.note.trim() || `${rule.title}（固定收支）`,
+        input_mode: "text_single",
+        ai_predicted_category_key: category.category_key,
+        ai_confidence: 1,
+        user_overridden: false,
+      },
+      ...previous,
+    ])
+
+    setRecurringRecordLogs(previous => [
+      {
+        id: uid("rlog"),
+        recurring_id: rule.id,
+        occurred_at: today,
+        transaction_id: transactionId,
+        created_at: new Date().toISOString(),
+        source: "manual",
+      },
+      ...previous,
+    ])
+
+    setBanner(`已手動記錄：${rule.title} ${formatMoney(rule.amount)}`)
+  }
+
+  function renderHome() {
+    const selectedYear = Number(selectedMonth.split("-")[0])
+    const selectedMonthNum = Number(selectedMonth.split("-")[1])
+
+    function pickMonth(month: number) {
+      const key = `${pickerYear}-${String(month).padStart(2, "0")}`
+      setSelectedMonth(key)
+      setMonthPickerOpen(false)
+    }
+
+    return (
+      <div className="space-y-3 sm:space-y-4">
+        <Card className="border-indigo-400/30 bg-slate-900/70 overflow-hidden">
+          <CardContent className="pt-4 pb-4 sm:pt-5 sm:pb-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerYear(selectedYear)
+                  setMonthPickerOpen(previous => !previous)
+                }}
+                className="flex-1 flex items-center justify-center gap-1.5 min-h-[40px] rounded-md border border-white/20 bg-slate-950/60 hover:bg-slate-950/40 transition-colors cursor-pointer"
+              >
+                <span className="text-sm sm:text-base font-medium text-white select-none">
                   {formatMonthLabel(selectedMonth)}
                 </span>
-                <input
-                  type="month"
-                  value={selectedMonth}
-                  onChange={event => {
-                    const nextMonth = event.target.value
-                    if (/^\d{4}-\d{2}$/.test(nextMonth)) {
-                      setSelectedMonth(nextMonth)
-                    }
-                  }}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-              </label>
+                <svg className={`h-3 w-3 text-slate-300 transition-transform ${monthPickerOpen ? "rotate-180" : ""}`} viewBox="0 0 12 12" fill="none">
+                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] min-w-[44px] shrink-0"
-                onClick={() => setSelectedMonth(previous => shiftMonthKey(previous, 1))}
-                aria-label="下個月"
-              >
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2.5 sm:p-3">
-                <p className="text-[11px] sm:text-xs text-emerald-100/90">當月收入</p>
-                <p className="text-base sm:text-lg font-semibold text-emerald-200 truncate">{formatMoney(monthIncome)}</p>
-              </div>
-              <div className="rounded-lg border border-rose-300/20 bg-rose-500/10 p-2.5 sm:p-3">
-                <p className="text-[11px] sm:text-xs text-rose-100/90">當月支出</p>
-                <p className="text-base sm:text-lg font-semibold text-rose-200 truncate">{formatMoney(monthExpense)}</p>
-              </div>
-              <div className="rounded-lg border border-white/15 bg-white/5 p-2.5 sm:p-3">
-                <p className="text-[11px] sm:text-xs text-slate-300">淨收支</p>
-                <p className={`text-base sm:text-lg font-semibold truncate ${monthNet >= 0 ? "text-emerald-200" : "text-rose-300"}`}>
-                  {formatMoney(monthNet)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-white/15 bg-white/5 p-2.5 sm:p-3">
-                <p className="text-[11px] sm:text-xs text-slate-300">記帳筆數</p>
-                <p className="text-base sm:text-lg font-semibold text-white">{monthTxCount} 筆</p>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-white/10 bg-slate-950/50 px-3 py-2 text-sm text-slate-200">{monthInsightText}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-purple-400/30 bg-slate-900/70">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-white text-xl">距離夢想目標差額</CardTitle>
-            <CardDescription className="text-slate-300">把每次記帳轉成可行動的目標節奏</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <Input
-                type="number"
-                min={0}
-                value={dreamTarget}
-                onChange={event => setDreamTarget(Math.max(0, Number(event.target.value) || 0))}
-                className="bg-slate-950/60 text-white border-white/20"
-                placeholder="目標"
-              />
-              <Input
-                type="number"
-                min={0}
-                value={dreamSaved}
-                onChange={event => setDreamSaved(Math.max(0, Number(event.target.value) || 0))}
-                className="bg-slate-950/60 text-white border-white/20"
-                placeholder="已存"
-              />
-              <Input
-                type="date"
-                value={dreamDeadline}
-                onChange={event => setDreamDeadline(event.target.value)}
-                className="bg-slate-950/60 text-white border-white/20"
-              />
-            </div>
-
-            <div className="rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-fuchsia-500/20 via-purple-500/10 to-indigo-500/20 p-3 sm:p-4">
-              <p className="text-[11px] sm:text-xs text-fuchsia-100/90">離夢想目標還差</p>
-              <p className="mt-1 text-2xl sm:text-3xl font-bold tracking-wide text-white truncate">{formatMoney(dreamPlan.targetLeft)}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="border-white/25 bg-white/10 text-white">
-                  已存 {formatMoney(dreamSaved)}
-                </Badge>
-                <Badge variant="outline" className="border-white/25 bg-white/10 text-white">
-                  目標 {formatMoney(dreamTarget)}
-                </Badge>
-                <Badge variant="outline" className="border-white/25 bg-white/10 text-white">
-                  剩餘 {dreamPlan.monthsLeft} 個月
-                </Badge>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-slate-300">
-                  <span>累積達成率</span>
-                  <span className="font-semibold text-white">{dreamCompletionRate.toFixed(1)}%</span>
-                </div>
-                <Progress
-                  value={dreamCompletionRate}
-                  className="h-2.5 bg-white/10 [&>div]:bg-gradient-to-r [&>div]:from-indigo-400 [&>div]:to-fuchsia-400"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-slate-300">
-                  <span>本月節奏</span>
-                  <span className="font-semibold text-white">{dreamPaceLabel}</span>
-                </div>
-                <Progress value={monthPaceRate} className={`h-2.5 bg-white/10 ${dreamPaceStatus.barClass}`} />
-                <p className={`text-sm ${dreamPaceStatus.textClass}`}>
-                  {dreamPaceStatus.title}：{dreamPaceStatus.hint}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-md border border-white/10 bg-slate-950/40 p-2">
-                  <p className="text-xs text-slate-300">每月建議存</p>
-                  <p className="text-sm font-semibold text-white">{formatMoney(dreamPlan.shouldSavePerMonth)}</p>
-                </div>
-                <div className="rounded-md border border-white/10 bg-slate-950/40 p-2">
-                  <p className="text-xs text-slate-300">當月淨額</p>
-                  <p className={`text-sm font-semibold ${monthNet >= 0 ? "text-emerald-200" : "text-rose-300"}`}>
-                    {formatMoney(monthNet)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-white/15 bg-slate-900/70">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle className="text-white text-lg sm:text-xl">{formatMonthLabel(selectedMonth)} 最近 3 筆</CardTitle>
-              <div className="flex items-center gap-2">
-                <Button
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 text-xs sm:text-sm min-h-[36px]"
-                  onClick={() => {
-                    setStep("analysis")
-                    cancelEditTransaction()
-                  }}
+                  onClick={() => setHomeViewMode(prev => prev === "chart" ? "calendar" : "chart")}
+                  className={`flex items-center justify-center w-10 h-10 rounded-md border transition-colors ${
+                    homeViewMode === "calendar"
+                      ? "border-amber-400/40 bg-amber-400/10 text-amber-300"
+                      : "border-white/20 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+                  }`}
+                  aria-label="切換圓餅圖／行事曆"
                 >
-                  財務分析
-                </Button>
+                  {homeViewMode === "chart"
+                    ? <CalendarDays className="h-4 w-4" />
+                    : <PieChartIcon className="h-4 w-4" />
+                  }
+                </button>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 text-xs sm:text-sm min-h-[36px]"
+                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 text-xs min-h-[40px] px-2.5"
                   onClick={() => {
                     setStep("overview")
                     setOverviewQuery("")
@@ -2077,36 +2700,288 @@ export default function MvpAccountingPage() {
                     cancelEditTransaction()
                   }}
                 >
-                  查看全部
+                  全部
                 </Button>
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {recentTransactions.length === 0 ? (
-              <p className="text-slate-300 text-sm">{formatMonthLabel(selectedMonth)} 尚無交易資料，按下下方「＋」開始。</p>
-            ) : (
-              recentTransactions.map(item => (
-                <div key={item.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm text-white truncate">{item.note}</p>
-                    <p className={`text-sm font-semibold ${item.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
-                      {item.direction === "expense" ? "-" : "+"}
-                      {formatMoney(item.amount)}
-                    </p>
+
+            {monthPickerOpen && (
+              <div className="rounded-lg border border-white/15 bg-slate-950/70 p-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center justify-between">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-white hover:bg-white/10 min-h-[36px] min-w-[36px] p-0"
+                    onClick={() => setPickerYear(previous => previous - 1)}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm font-semibold text-white">{pickerYear} 年</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-white hover:bg-white/10 min-h-[36px] min-w-[36px] p-0"
+                    onClick={() => setPickerYear(previous => previous + 1)}
+                  >
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
+                    const isSelected = pickerYear === selectedYear && month === selectedMonthNum
+                    return (
+                      <button
+                        key={month}
+                        type="button"
+                        onClick={() => pickMonth(month)}
+                        className={`rounded-full py-2 text-sm font-medium transition-colors min-h-[40px] ${
+                          isSelected
+                            ? "bg-amber-400 text-slate-900"
+                            : "bg-white/5 text-white border border-white/15 hover:bg-white/10 active:bg-white/20"
+                        }`}
+                      >
+                        {month}月
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {homeViewMode === "chart" ? (
+              <div className="relative w-full h-56 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={donutData}
+                      cx="50%"
+                      cy="60%"
+                      innerRadius="40%"
+                      outerRadius="72%"
+                      dataKey="value"
+                      strokeWidth={0}
+                    >
+                      {donutData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatsDetailDirection("net")
+                    setStatsTimeRange("month")
+                    setStep("stats-detail")
+                  }}
+                  className="absolute inset-0 flex flex-col items-center justify-center hover:bg-white/3 active:bg-white/5 transition-colors rounded-full"
+                  style={{ top: "16%", bottom: "0%" }}
+                >
+                  <p className="text-[10px] sm:text-xs text-slate-400">總結餘</p>
+                  <p className={`text-sm sm:text-lg font-bold leading-tight ${monthNet >= 0 ? "text-emerald-200" : "text-rose-300"}`}>
+                    {formatMoney(monthNet)}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatsDetailDirection("expense")
+                    setStatsTimeRange("month")
+                    setStep("stats-detail")
+                  }}
+                  className="absolute top-0 left-0 text-left rounded-xl p-2.5 hover:bg-rose-500/10 active:bg-rose-500/20 transition-colors"
+                >
+                  <p className="text-xs text-rose-200/70 mb-0.5">總支出</p>
+                  <p className="text-base sm:text-lg font-bold text-rose-300 leading-tight">{formatMoney(monthExpense)}</p>
+                  <ArrowRight className="h-3 w-3 text-rose-200/40 mt-1" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatsDetailDirection("income")
+                    setStatsTimeRange("month")
+                    setStep("stats-detail")
+                  }}
+                  className="absolute top-0 right-0 text-right rounded-xl p-2.5 hover:bg-emerald-500/10 active:bg-emerald-500/20 transition-colors"
+                >
+                  <p className="text-xs text-emerald-200/70 mb-0.5">總收入</p>
+                  <p className="text-base sm:text-lg font-bold text-emerald-300 leading-tight">{formatMoney(monthIncome)}</p>
+                  <ArrowLeft className="h-3 w-3 text-emerald-200/40 mt-1 ml-auto" />
+                </button>
+              </div>
+            ) : (() => {
+              const [hcY, hcM] = selectedMonth.split("-").map(Number)
+              const hcDaysInMonth = new Date(hcY, hcM, 0).getDate()
+              const hcFirstDay = new Date(hcY, hcM - 1, 1).getDay()
+              const hcOffset = hcFirstDay === 0 ? 6 : hcFirstDay - 1
+              const hcTodayStr = new Date().toISOString().slice(0, 10)
+              const hcWeekdays = ["一", "二", "三", "四", "五", "六", "日"]
+
+              return (
+                <div className="space-y-2">
+                  {/* Weekday header */}
+                  <div className="grid grid-cols-7 gap-px">
+                    {hcWeekdays.map(wd => (
+                      <div key={wd} className="text-center text-[10px] text-slate-500 font-medium py-1">{wd}</div>
+                    ))}
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className="text-[11px] border-white/20 text-slate-200">
-                      {categoryLabel(item.category_key)}
-                    </Badge>
-                    <span className="text-[11px] text-slate-400">{item.occurred_at}</span>
-                    <span className="text-[11px] text-slate-400">{modeLabel(item.input_mode)}</span>
+
+                  {/* Day grid */}
+                  <div className="grid grid-cols-7 gap-px">
+                    {Array.from({ length: hcOffset }).map((_, i) => (
+                      <div key={`pad-${i}`} className="h-12 sm:h-14" />
+                    ))}
+                    {Array.from({ length: hcDaysInMonth }, (_, i) => {
+                      const day = i + 1
+                      const dateStr = `${hcY}-${String(hcM).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+                      const isToday = dateStr === hcTodayStr
+                      const dayTxs = currentMonthTx.filter(tx => tx.occurred_at === dateStr)
+                      const dayExp = dayTxs.filter(tx => tx.direction === "expense").reduce((s, tx) => s + tx.amount, 0)
+                      const dayInc = dayTxs.filter(tx => tx.direction === "income").reduce((s, tx) => s + tx.amount, 0)
+                      const hasData = dayExp > 0 || dayInc > 0
+
+                      return (
+                        <div
+                          key={day}
+                          className={`h-12 sm:h-14 rounded-lg flex flex-col items-center pt-1 ${
+                            isToday ? "bg-amber-400/15 border border-amber-400/40" : ""
+                          }`}
+                        >
+                          <span className={`text-[11px] font-medium leading-none ${isToday ? "text-amber-300" : "text-slate-300"}`}>
+                            {day}
+                          </span>
+                          {hasData && (
+                            <div className="flex flex-col items-center gap-0.5 mt-auto mb-1">
+                              {dayExp > 0 && (
+                                <span className="text-[8px] sm:text-[9px] text-rose-400 font-medium leading-none">
+                                  {dayExp >= 10000 ? `${(dayExp / 10000).toFixed(1)}萬` : dayExp >= 1000 ? `${(dayExp / 1000).toFixed(0)}k` : formatMoney(dayExp)}
+                                </span>
+                              )}
+                              <div className="flex gap-0.5">
+                                {dayExp > 0 && <span className="w-1 h-1 rounded-full bg-rose-400" />}
+                                {dayInc > 0 && <span className="w-1 h-1 rounded-full bg-emerald-400" />}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Summary row */}
+                  <div className="flex items-center justify-between text-[11px] border-t border-white/10 pt-2 mt-1 px-0.5">
+                    <button
+                      type="button"
+                      onClick={() => { setStatsDetailDirection("expense"); setStatsTimeRange("month"); setStep("stats-detail") }}
+                      className="text-rose-300 hover:text-rose-200 transition-colors"
+                    >
+                      支出：{formatMoney(monthExpense)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setStatsDetailDirection("income"); setStatsTimeRange("month"); setStep("stats-detail") }}
+                      className="text-emerald-300 hover:text-emerald-200 transition-colors"
+                    >
+                      收入：{formatMoney(monthIncome)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setStatsDetailDirection("net"); setStatsTimeRange("month"); setStep("stats-detail") }}
+                      className={`transition-colors ${monthNet >= 0 ? "text-emerald-200 hover:text-emerald-100" : "text-rose-200 hover:text-rose-100"}`}
+                    >
+                      結餘：{monthNet > 0 ? "+" : ""}{formatMoney(monthNet)}
+                    </button>
                   </div>
                 </div>
-              ))
-            )}
+              )
+            })()}
+
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 text-xs min-h-[34px] px-3"
+                onClick={() => {
+                  setStep("analysis")
+                  cancelEditTransaction()
+                }}
+              >
+                財務分析
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-indigo-300/35 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20 text-xs min-h-[34px] px-3"
+                onClick={() => {
+                  setStep("recurring")
+                  setBanner(null)
+                }}
+              >
+                固定收支
+              </Button>
+              <span className="text-xs text-slate-400">
+                {monthTxCount} 筆紀錄 ・ 固定可執行 {recurringSummary.active_with_remaining} 項 ・ 今日到期 {recurringSummary.dueToday}
+              </span>
+            </div>
           </CardContent>
         </Card>
+
+        {/* 夢想目標差額：暫時隱藏，後續開放 */}
+
+        {sortedCurrentMonthTransactions.length === 0 ? (
+          <div className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-8 text-center">
+            <p className="text-slate-300 text-sm">{formatMonthLabel(selectedMonth)} 尚無記帳資料</p>
+            <p className="text-slate-400 text-xs mt-1">按下方「＋」開始記帳</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {groupedByDate.map(group => (
+              <div key={group.date}>
+                <div className="flex items-center justify-between px-1 mb-1.5">
+                  <p className="text-xs sm:text-sm font-medium text-slate-200">{group.label}</p>
+                  {group.dayExpense > 0 && (
+                    <p className="text-xs text-rose-300">-{formatMoney(group.dayExpense)}</p>
+                  )}
+                </div>
+                <Card className="border-white/10 bg-slate-900/70">
+                  <CardContent className="p-0 divide-y divide-white/5">
+                    {group.transactions.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => openEntryForEdit(item)}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 sm:py-3 text-left hover:bg-white/5 active:bg-white/10 transition-colors"
+                      >
+                        <div className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                          <span className="text-xs">
+                            {item.direction === "expense" ? "💸" : "💰"}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white truncate">{item.note}</p>
+                          <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">
+                            {categoryLabel(item.category_key)}
+                          </p>
+                        </div>
+                        <p className={`text-sm font-semibold shrink-0 ${item.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
+                          {item.direction === "expense" ? "-" : "+"}
+                          {formatMoney(item.amount)}
+                        </p>
+                      </button>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -2245,25 +3120,31 @@ export default function MvpAccountingPage() {
                         className="min-h-[80px] sm:min-h-[90px] bg-slate-950/60 border-white/20 text-white text-sm"
                       />
 
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          value={editDraft.amount}
-                          onChange={event =>
-                            setEditDraft(previous => (previous ? { ...previous, amount: event.target.value } : previous))
-                          }
-                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
-                          placeholder="金額"
-                        />
-                        <Input
-                          type="date"
-                          value={editDraft.occurred_at}
-                          onChange={event =>
-                            setEditDraft(previous => (previous ? { ...previous, occurred_at: event.target.value } : previous))
-                          }
-                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
-                        />
+                      <div className="flex flex-col gap-2">
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-slate-500 px-0.5">金額</p>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={editDraft.amount}
+                            onChange={event =>
+                              setEditDraft(previous => (previous ? { ...previous, amount: event.target.value } : previous))
+                            }
+                            className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+                            placeholder="金額"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-slate-500 px-0.5">日期</p>
+                          <Input
+                            type="date"
+                            value={editDraft.occurred_at}
+                            onChange={event =>
+                              setEditDraft(previous => (previous ? { ...previous, occurred_at: event.target.value } : previous))
+                            }
+                            className="w-full bg-slate-950/60 border-white/20 text-white min-h-[44px] [color-scheme:dark]"
+                          />
+                        </div>
                       </div>
 
                       <select
@@ -2358,6 +3239,531 @@ export default function MvpAccountingPage() {
     )
   }
 
+  const entryCategories = useMemo(() => {
+    const filtered = TAXONOMY.filter(c => c.direction === entryDirection)
+    filtered.sort((a, b) => {
+      if (a.domain === b.domain) return 0
+      return a.domain === "life" ? -1 : 1
+    })
+    return filtered
+  }, [entryDirection])
+
+  function calcPress(key: string) {
+    setEntryCalcDisplay(prev => {
+      if (key === "AC") return "0"
+      if (key === "⌫") return prev.length <= 1 ? "0" : prev.slice(0, -1)
+      if (key === "." && prev.includes(".")) return prev
+      if (key === "=" || key === "OK") {
+        try {
+          const expression = prev.replaceAll("×", "*").replaceAll("÷", "/")
+          const result = Function(`"use strict"; return (${expression})`)()
+          if (typeof result === "number" && Number.isFinite(result)) {
+            return String(Math.round(Math.abs(result)))
+          }
+        } catch {
+          /* keep current display */
+        }
+        return prev
+      }
+
+      if (["+", "-", "×", "÷"].includes(key)) {
+        const lastChar = prev.at(-1) ?? ""
+        if (["+", "-", "×", "÷"].includes(lastChar)) {
+          return prev.slice(0, -1) + key
+        }
+        return prev + key
+      }
+
+      if (prev === "0" && key !== ".") return key
+      return prev + key
+    })
+  }
+
+  function calcEvaluate(): number {
+    try {
+      const expression = entryCalcDisplay.replaceAll("×", "*").replaceAll("÷", "/")
+      const result = Function(`"use strict"; return (${expression})`)()
+      if (typeof result === "number" && Number.isFinite(result)) {
+        return Math.round(Math.abs(result))
+      }
+    } catch {
+      /* ignore */
+    }
+    const parsed = Number.parseFloat(entryCalcDisplay)
+    return Number.isFinite(parsed) ? Math.round(Math.abs(parsed)) : 0
+  }
+
+  function openEntryDatePicker() {
+    const input = entryDateInputRef.current
+    if (!input) return
+
+    input.focus()
+
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void }
+    if (typeof pickerInput.showPicker === "function") {
+      pickerInput.showPicker()
+      return
+    }
+
+    input.click()
+  }
+
+  function openEntryForEdit(tx: Transaction) {
+    const dir = tx.direction === "income" || tx.direction === "expense" ? tx.direction : "expense"
+    setEntryEditingId(tx.id)
+    setEntryDirection(dir)
+    setEntryCategory(tx.category_key)
+    setEntryCalcDisplay(String(tx.amount))
+    setEntryNote(tx.note)
+    setEntryDate(tx.occurred_at)
+    setEntryAdvancedMode("none")
+    setBanner(null)
+    setStep("new-entry")
+  }
+
+  function deleteEntryEditing() {
+    if (!entryEditingId) return
+    if (typeof globalThis.window !== "undefined") {
+      const confirmed = globalThis.window.confirm("確定要刪除這筆交易嗎？")
+      if (!confirmed) return
+    }
+    setTransactions(prev => prev.filter(t => t.id !== entryEditingId))
+    setEntryEditingId(null)
+    setStep("home")
+    setBanner("已刪除這筆交易。")
+  }
+
+  function saveQuickEntry() {
+    const amount = calcEvaluate()
+    if (amount <= 0) return
+
+    const category = CATEGORY_BY_KEY.get(entryCategory)
+    const fallbackKey =
+      entryDirection === "expense" ? "life_expense_other" : "life_income_other"
+    const resolvedCategory = category ?? CATEGORY_BY_KEY.get(fallbackKey)!
+
+    if (entryEditingId) {
+      setTransactions(prev =>
+        prev.map(t => {
+          if (t.id !== entryEditingId) return t
+          return {
+            ...t,
+            occurred_at: entryDate,
+            amount,
+            direction: entryDirection,
+            domain: resolvedCategory.domain,
+            category_key: resolvedCategory.category_key,
+            note: entryNote.trim() || resolvedCategory.display_name_zh,
+            user_overridden: t.ai_predicted_category_key !== resolvedCategory.category_key,
+          }
+        })
+      )
+      setBanner(`已更新：${resolvedCategory.display_name_zh} ${formatMoney(amount)}`)
+    } else {
+      const tx: Transaction = {
+        id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        user_id: DEMO_USER_ID,
+        occurred_at: entryDate,
+        amount,
+        direction: entryDirection,
+        domain: resolvedCategory.domain,
+        category_key: resolvedCategory.category_key,
+        note: entryNote.trim() || resolvedCategory.display_name_zh,
+        input_mode: "text_single",
+        ai_predicted_category_key: resolvedCategory.category_key,
+        ai_confidence: 1,
+        user_overridden: false,
+      }
+      setTransactions(prev => [...prev, tx])
+      setBanner(`已新增：${resolvedCategory.display_name_zh} ${formatMoney(amount)}`)
+    }
+
+    setEntryEditingId(null)
+    setEntryCalcDisplay("0")
+    setEntryNote("")
+    setEntryCategory("")
+    setEntryDate(new Date().toISOString().slice(0, 10))
+    setStep("home")
+  }
+
+  function renderNewEntry() {
+    const isEditing = entryEditingId !== null
+    const CALC_KEYS = [
+      ["7", "8", "9", "÷", "AC"],
+      ["4", "5", "6", "×", "⌫"],
+      ["1", "2", "3", "+", "="],
+      ["00", "0", ".", "-", ""],
+    ]
+    const calcAmount = calcEvaluate()
+
+    return (
+      <div className="flex flex-col min-h-[calc(100dvh-60px)]">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
+            onClick={() => {
+              setStep("home")
+              setEntryAdvancedMode("none")
+              setEntryEditingId(null)
+            }}
+          >
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
+            返回
+          </Button>
+          <Badge variant="outline" className={`text-xs ${isEditing ? "border-amber-300/40 bg-amber-500/10 text-amber-200" : "border-indigo-300/40 bg-indigo-500/10 text-indigo-200"}`}>
+            {isEditing ? "編輯交易" : "新增記帳"}
+          </Badge>
+          {isEditing ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-rose-300/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 min-h-[40px] text-xs px-3"
+              onClick={deleteEntryEditing}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1" />
+              刪除
+            </Button>
+          ) : (
+            <div className="w-[60px]" />
+          )}
+        </div>
+
+        {!isEditing && <div className="rounded-lg border border-indigo-300/30 bg-indigo-500/5 p-2.5 mb-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={`min-h-[40px] text-xs gap-1.5 ${
+                entryAdvancedMode === "text"
+                  ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
+                  : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+              }`}
+              onClick={() => {
+                setActiveMode("text_single")
+                setEntryAdvancedMode("text")
+                setBanner(null)
+              }}
+            >
+              <Mic className="h-3.5 w-3.5" />
+              多筆／語音輸入
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={`min-h-[40px] text-xs gap-1.5 ${
+                entryAdvancedMode === "file"
+                  ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
+                  : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+              }`}
+              onClick={() => {
+                setActiveMode("file_import")
+                setEntryAdvancedMode("file")
+                setBanner(null)
+              }}
+            >
+              <FileUp className="h-3.5 w-3.5" />
+              上傳檔案匯入
+            </Button>
+          </div>
+          <p className="text-[11px] text-slate-300 leading-relaxed">
+            一次貼上多筆內容或上傳檔案，系統會自動判斷收入/支出並分類到對應類型。
+          </p>
+        </div>}
+
+        {entryAdvancedMode === "none" ? (
+          <div className="flex items-center justify-center mb-3">
+            <div className="flex rounded-full border border-white/20 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setEntryDirection("expense")
+                  setEntryCategory("")
+                }}
+                className={`px-5 py-1.5 text-sm font-medium transition-colors ${
+                  entryDirection === "expense"
+                    ? "bg-rose-500 text-white"
+                    : "bg-white/5 text-slate-300 hover:bg-white/10"
+                }`}
+              >
+                支出
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEntryDirection("income")
+                  setEntryCategory("")
+                }}
+                className={`px-5 py-1.5 text-sm font-medium transition-colors ${
+                  entryDirection === "income"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-white/5 text-slate-300 hover:bg-white/10"
+                }`}
+              >
+                收入
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-3 rounded-md border border-indigo-300/30 bg-indigo-500/10 px-3 py-2">
+            <p className="text-xs text-indigo-100">智慧輸入模式：系統會自動判斷收入／支出與對應類別</p>
+          </div>
+        )}
+
+        {entryAdvancedMode === "none" && (
+          <>
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-3 max-h-[180px] overflow-y-auto pr-1">
+              {entryCategories.map(cat => {
+                const isActive = entryCategory === cat.category_key
+                return (
+                  <button
+                    key={cat.category_key}
+                    type="button"
+                    onClick={() => setEntryCategory(cat.category_key)}
+                    className={`flex flex-col items-center justify-center rounded-lg py-2 px-1 min-h-[56px] text-center transition-colors ${
+                      isActive
+                        ? entryDirection === "expense"
+                          ? "bg-rose-500/20 border border-rose-400/50 text-rose-200"
+                          : "bg-emerald-500/20 border border-emerald-400/50 text-emerald-200"
+                        : "bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 active:bg-white/15"
+                    }`}
+                  >
+                    <span className="text-xs leading-tight">{cat.display_name_zh}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="rounded-lg border border-white/15 bg-slate-950/60 p-2.5 mb-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">金額</span>
+                <p className="text-2xl sm:text-3xl font-bold text-white tracking-wide text-right truncate">
+                  {entryCalcDisplay === "0" ? "$0" : `$${entryCalcDisplay}`}
+                </p>
+              </div>
+              <Input
+                value={entryNote}
+                onChange={e => setEntryNote(e.target.value)}
+                className="bg-slate-950/60 border-white/20 text-white text-sm min-h-[40px]"
+                placeholder="輸入備註"
+              />
+              <div className="flex items-center gap-2">
+                {entryCategory ? (
+                  <Badge variant="outline" className="border-white/20 text-slate-200 text-[10px]">
+                    {categoryLabel(entryCategory)}
+                  </Badge>
+                ) : (
+                  <span className="text-[11px] text-slate-400">請先選擇一個類別</span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-1.5 mb-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[38px] min-w-[38px] shrink-0 px-0"
+                onClick={() => setEntryDate(prev => shiftDateByDays(prev, -1))}
+                aria-label="前一天"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <div className="relative flex-1">
+                <button
+                  type="button"
+                  onClick={openEntryDatePicker}
+                  className="w-full flex items-center justify-center min-h-[38px] rounded-md border border-white/20 bg-slate-950/60 hover:bg-slate-950/40 transition-colors"
+                >
+                  <span className="text-xs sm:text-sm font-medium text-white select-none">{formatEntryDateLabel(entryDate)}</span>
+                </button>
+                <input
+                  ref={entryDateInputRef}
+                  type="date"
+                  value={entryDate}
+                  onChange={e => {
+                    if (e.target.value) setEntryDate(e.target.value)
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 pointer-events-none"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[38px] min-w-[38px] shrink-0 px-0"
+                onClick={() => setEntryDate(prev => shiftDateByDays(prev, 1))}
+                aria-label="後一天"
+              >
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-1.5">
+              {CALC_KEYS.map((row, rowIndex) => (
+                <div key={rowIndex} className="grid grid-cols-5 gap-1.5">
+                  {row.map((key, colIndex) => {
+                    if (key === "" && rowIndex === 3 && colIndex === 4) {
+                      return (
+                        <button
+                          key="save-btn"
+                          type="button"
+                          onClick={saveQuickEntry}
+                          disabled={calcAmount <= 0}
+                          className="rounded-xl bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:opacity-40 text-white font-bold text-sm min-h-[48px] transition-colors"
+                        >
+                          {isEditing ? "更新" : "儲存"}
+                        </button>
+                      )
+                    }
+
+                    const isOp = ["+", "-", "×", "÷"].includes(key)
+                    const isEquals = key === "="
+                    const isAction = key === "AC" || key === "⌫"
+
+                    return (
+                      <button
+                        key={`${rowIndex}-${colIndex}`}
+                        type="button"
+                        onClick={() => calcPress(key)}
+                        className={`rounded-xl min-h-[48px] text-base font-medium transition-colors active:scale-95 ${
+                          isEquals
+                            ? "bg-amber-500 text-white hover:bg-amber-400"
+                            : isOp
+                              ? "bg-indigo-500/80 text-white hover:bg-indigo-400"
+                              : isAction
+                                ? "bg-slate-700 text-white hover:bg-slate-600"
+                                : "bg-white/10 text-white hover:bg-white/15"
+                        }`}
+                      >
+                        {key}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {entryAdvancedMode === "text" && (
+          <div className="flex-1 space-y-3">
+            <p className="text-xs text-slate-300">輸入多筆或使用語音，系統會自動判斷收入/支出與類別，完成後前往確認頁。</p>
+            <Textarea
+              value={singleText}
+              onChange={e => setSingleText(e.target.value)}
+              className="min-h-[120px] bg-slate-950/60 border-white/20 text-white text-sm placeholder:text-slate-400"
+              placeholder="早餐 65、咖啡 80、捷運 30"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={isListening ? "default" : "outline"}
+                className={`min-h-[44px] text-sm ${
+                  isListening
+                    ? "bg-rose-500 text-white hover:bg-rose-400"
+                    : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                }`}
+                disabled={!isSpeechSupported}
+                onClick={toggleSpeechInput}
+              >
+                <Mic className="mr-1.5 h-4 w-4 shrink-0" />
+                <span className="truncate">{isListening ? "停止語音" : "語音輸入"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] text-sm"
+                onClick={() => setEntryAdvancedMode("none")}
+              >
+                返回計算機
+              </Button>
+            </div>
+            {speechPreview && (
+              <div className="rounded-md border border-indigo-300/30 bg-indigo-500/10 p-2 text-xs text-indigo-100">
+                即時辨識：{speechPreview}
+              </div>
+            )}
+            {speechError && (
+              <div className="rounded-md border border-rose-300/30 bg-rose-500/10 p-2 text-xs text-rose-100">
+                {speechError}
+              </div>
+            )}
+            <Button
+              onClick={() => {
+                handleParseInput("text_single")
+              }}
+              className="w-full bg-indigo-500 text-white hover:bg-indigo-400 min-h-[48px] text-base"
+              disabled={!singleText.trim()}
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              解析並前往確認
+            </Button>
+          </div>
+        )}
+
+        {entryAdvancedMode === "file" && (
+          <div className="flex-1 space-y-3">
+            <p className="text-xs text-slate-300">支援圖片、Excel、PDF、Word、PPT，系統會自動判斷收入/支出與類別。</p>
+            <Input
+              type="file"
+              accept="image/*,.xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx"
+              className="bg-slate-950/60 border-white/20 text-slate-200 file:text-slate-200 min-h-[44px]"
+              onChange={event => void handleFilePicked(event.target.files?.[0] ?? null)}
+            />
+            {uploadedFile && (
+              <p className="text-xs text-slate-400">
+                已上傳：{uploadedFile.name}（{uploadKind === "image" ? "照片" : "檔案"}）
+              </p>
+            )}
+            {uploadKind === "image" && uploadedFile && (
+              <>
+                <Input
+                  type="number"
+                  min={0}
+                  value={photoAmount}
+                  onChange={e => setPhotoAmount(e.target.value)}
+                  className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+                  placeholder="金額（必填）"
+                />
+                <Textarea
+                  value={photoNote}
+                  onChange={e => setPhotoNote(e.target.value)}
+                  className="min-h-[80px] bg-slate-950/60 border-white/20 text-white placeholder:text-slate-400 text-sm"
+                  placeholder="備註（店名、用途）"
+                />
+              </>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] text-sm"
+                onClick={() => setEntryAdvancedMode("none")}
+              >
+                返回計算機
+              </Button>
+              <Button
+                onClick={() => {
+                  handleParseInput("file_import")
+                }}
+                className="bg-indigo-500 text-white hover:bg-indigo-400 min-h-[44px] text-sm"
+                disabled={isFileParsing || !uploadedFile}
+              >
+                <Sparkles className="mr-1.5 h-4 w-4" />
+                解析確認
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   function renderQuickAdd() {
     const activeMeta = MODE_OPTIONS.find(option => option.mode === activeMode)
     return (
@@ -2444,200 +3850,191 @@ export default function MvpAccountingPage() {
             {activeMode === "file_import" && (
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <p className="text-xs sm:text-sm text-slate-200">支援上傳：照片、試算表、文件、可攜式文件</p>
+                  <p className="text-xs sm:text-sm text-slate-200">支援上傳：圖片、Excel、PDF、Word、PPT</p>
                   <Input
                     type="file"
-                    accept="image/*,.xlsx,.csv,.docx,.pdf"
+                    multiple
+                    accept="image/*,.xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx"
                     className="bg-slate-950/60 border-white/20 text-slate-200 file:text-slate-200 min-h-[44px]"
-                    onChange={event => void handleFilePicked(event.target.files?.[0] ?? null)}
+                    onChange={event => handleFilesPicked(Array.from(event.target.files ?? []))}
                   />
-                  {isFileParsing && uploadKind === "document" && <p className="text-xs text-indigo-200">檔案解析中...</p>}
-                  {uploadedFile && (
-                    <p className="text-xs text-slate-400">
-                      已上傳：{uploadedFile.name}（{uploadKind === "image" ? "照片模式" : "檔案匯入模式"}）
-                    </p>
+                  {isFileParsing && <p className="text-xs text-indigo-200">檔案處理中...</p>}
+                  {uploadedFiles.length > 0 && (
+                    <div className="rounded-md border border-indigo-300/30 bg-indigo-500/10 p-3 text-xs text-indigo-100 space-y-1">
+                      <p>已上傳 {uploadedFiles.length} 個檔案，系統已自動產生 AI 假資料供你確認。</p>
+                      <p className="text-indigo-200/80 break-all">
+                        {uploadedFiles.slice(0, 3).map(file => file.name).join("、")}
+                        {uploadedFiles.length > 3 ? ` 等 ${uploadedFiles.length} 個檔案` : ""}
+                      </p>
+                    </div>
                   )}
                 </div>
 
-                {uploadKind === "image" && uploadedFile && (
-                  <>
-                    <div className="rounded-md border border-indigo-300/30 bg-indigo-500/10 p-3 text-xs text-indigo-100">
-                      已偵測為照片，將走「照片附件 + 手動補金額」流程。
-                    </div>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={photoAmount}
-                      onChange={event => setPhotoAmount(event.target.value)}
-                      className="bg-slate-950/60 border-white/20 text-white"
-                      placeholder="金額（必填）"
-                    />
-                    <Textarea
-                      value={photoNote}
-                      onChange={event => setPhotoNote(event.target.value)}
-                      className="min-h-[100px] bg-slate-950/60 border-white/20 text-white placeholder:text-slate-400"
-                      placeholder="備註（店名、用途、情境）"
-                    />
-                  </>
-                )}
-
-                {uploadKind === "document" && previewRows.length > 0 && (
-                  <>
-                    <div className="rounded-md border border-indigo-300/30 bg-indigo-500/10 p-3 text-xs text-indigo-100">
-                      已自動判斷欄位，可直接按「解析並前往確認」。若結果不準，再開啟欄位設定調整。
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setShowMappingSettings(previous => !previous)}
-                      className="w-full border-white/20 bg-white/5 text-white hover:bg-white/10"
-                    >
-                      {showMappingSettings ? "收合欄位設定" : "調整欄位設定"}
-                    </Button>
-
-                    {showMappingSettings && (
-                      <>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <label className="text-xs text-slate-300">
-                            日期欄位（可選）
-                            <select
-                              value={fileMapping.date_column}
-                              onChange={event =>
-                                setFileMapping(prev => ({
-                                  ...prev,
-                                  date_column: event.target.value,
-                                }))
-                              }
-                              className="mt-1 w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                            >
-                              <option value="none">不使用</option>
-                              {fileColumns.map(column => (
-                                <option key={column} value={column}>
-                                  {toColumnLabel(column)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-
-                          <label className="text-xs text-slate-300">
-                            金額欄位（必選）
-                            <select
-                              value={fileMapping.amount_column}
-                              onChange={event =>
-                                setFileMapping(prev => ({
-                                  ...prev,
-                                  amount_column: event.target.value,
-                                }))
-                              }
-                              className="mt-1 w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                            >
-                              <option value="none">請選擇</option>
-                              {fileColumns.map(column => (
-                                <option key={column} value={column}>
-                                  {toColumnLabel(column)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-
-                          <label className="text-xs text-slate-300">
-                            描述欄位（可選）
-                            <select
-                              value={fileMapping.description_column}
-                              onChange={event =>
-                                setFileMapping(prev => ({
-                                  ...prev,
-                                  description_column: event.target.value,
-                                }))
-                              }
-                              className="mt-1 w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                            >
-                              {fileColumns.map(column => (
-                                <option key={column} value={column}>
-                                  {toColumnLabel(column)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-
-                          <label className="text-xs text-slate-300">
-                            收支判斷
-                            <select
-                              value={fileMapping.direction_mode}
-                              onChange={event =>
-                                setFileMapping(prev => ({
-                                  ...prev,
-                                  direction_mode: event.target.value as FileMapping["direction_mode"],
-                                }))
-                              }
-                              className="mt-1 w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                            >
-                              <option value="sign">金額正負（負=支出）</option>
-                              <option value="direction_column">使用收支欄位</option>
-                            </select>
-                          </label>
-                        </div>
-
-                        {fileMapping.direction_mode === "direction_column" && (
-                          <label className="text-xs text-slate-300 block">
-                            收支欄位
-                            <select
-                              value={fileMapping.direction_column}
-                              onChange={event =>
-                                setFileMapping(prev => ({
-                                  ...prev,
-                                  direction_column: event.target.value,
-                                }))
-                              }
-                              className="mt-1 w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                            >
-                              <option value="none">請選擇</option>
-                              {fileColumns.map(column => (
-                                <option key={column} value={column}>
-                                  {toColumnLabel(column)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-
-                        <Button
+                {drafts.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/15 bg-slate-950/40 p-1">
+                        <button
                           type="button"
-                          variant="outline"
-                          onClick={rememberTemplate}
-                          className="w-full border-indigo-400/30 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                          onClick={() => setFileImportTab("expense")}
+                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                            fileImportTab === "expense"
+                              ? "bg-rose-500 text-white"
+                              : "text-slate-300 hover:bg-white/10"
+                          }`}
                         >
-                          記住此模板
-                        </Button>
-                      </>
-                    )}
+                          支出（{drafts.filter(item => item.direction === "expense").length}）
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFileImportTab("income")}
+                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                            fileImportTab === "income"
+                              ? "bg-emerald-500 text-slate-950"
+                              : "text-slate-300 hover:bg-white/10"
+                          }`}
+                        >
+                          收入（{drafts.filter(item => item.direction === "income").length}）
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDrafts(generateRandomDrafts(Math.min(Math.max(uploadedFiles.length * 4, 4), 40)))}
+                        className="text-[11px] text-indigo-300 hover:text-indigo-100 transition-colors flex items-center gap-1"
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        重新產生
+                      </button>
+                    </div>
 
-                    <div className="rounded-lg border border-white/15 bg-slate-950/60 p-3">
-                      <p className="text-xs text-slate-300 mb-2">匯入預覽（前 5 列）</p>
-                      <div className="space-y-1">
-                        {previewRows.slice(0, 5).map((row, idx) => (
-                          <p key={`${row.join("_")}_${idx}`} className="text-xs text-slate-200 break-all">
-                            {row.join(" ｜ ")}
-                          </p>
-                        ))}
+                    <div className="space-y-3">
+                      {drafts
+                        .map((draft, index) => ({ draft, index }))
+                        .filter(item => item.draft.direction === fileImportTab)
+                        .map(({ draft, index }) => {
+                          const categoryOptions = TAXONOMY.filter(category => category.direction === fileImportTab)
+                          return (
+                            <div key={draft.id} className="rounded-xl border border-white/15 bg-slate-900/60 p-3 space-y-2">
+                              <div className="flex items-start gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <Input
+                                    value={draft.note}
+                                    onChange={event => updateDraft(index, item => ({ ...item, note: event.target.value }))}
+                                    className="bg-transparent border-0 border-b border-white/10 rounded-none px-0 py-1 text-sm text-white focus-visible:ring-0 focus-visible:border-indigo-400 h-auto"
+                                    placeholder="備註"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setDrafts(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
+                                  className="text-slate-500 hover:text-rose-400 transition-colors shrink-0 mt-1"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-0.5">
+                                  <p className="text-[9px] text-slate-500">金額 <span className="text-rose-400">*</span></p>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    data-draft-amount={index}
+                                    value={draft.amount}
+                                    onChange={event =>
+                                      updateDraft(index, item => ({
+                                        ...item,
+                                        amount: Math.max(0, Number(event.target.value) || 0),
+                                      }))
+                                    }
+                                    className={`bg-slate-950/50 text-white text-xs h-8 px-2 ${
+                                      draft.amount <= 0 ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/10"
+                                    }`}
+                                  />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <p className="text-[9px] text-slate-500">日期 <span className="text-rose-400">*</span></p>
+                                  <Input
+                                    type="date"
+                                    data-draft-date={index}
+                                    value={draft.occurred_at}
+                                    onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
+                                    className={`bg-slate-950/50 text-white text-xs h-8 px-1.5 [color-scheme:dark] ${
+                                      !draft.occurred_at ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/10"
+                                    }`}
+                                  />
+                                </div>
+                              </div>
+
+                              <select
+                                value={draft.category_key}
+                                onChange={event => {
+                                  const category = CATEGORY_BY_KEY.get(event.target.value)
+                                  if (!category) return
+                                  updateDraft(index, item => ({
+                                    ...item,
+                                    category_key: category.category_key,
+                                    domain: category.domain,
+                                    direction: category.direction,
+                                    user_overridden: true,
+                                  }))
+                                }}
+                                className="w-full rounded-md border border-white/10 bg-slate-950/50 px-2 py-1.5 text-xs text-white"
+                              >
+                                {categoryOptions.map(category => (
+                                  <option key={category.category_key} value={category.category_key}>
+                                    {categoryLabel(category.category_key)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )
+                        })}
+                      {drafts.filter(item => item.direction === fileImportTab).length === 0 && (
+                        <p className="text-xs text-slate-400 text-center py-6">目前沒有{fileImportTab === "expense" ? "支出" : "收入"}資料</p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-slate-900/50 p-3 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400">總筆數 {drafts.length}</span>
+                        <span className="text-slate-300 font-medium">
+                          合計 {formatMoney(drafts.reduce((sum, item) => sum + item.amount, 0))}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-500">
+                        <span>
+                          支出 {formatMoney(drafts.filter(item => item.direction === "expense").reduce((sum, item) => sum + item.amount, 0))}
+                        </span>
+                        <span>
+                          收入 {formatMoney(drafts.filter(item => item.direction === "income").reduce((sum, item) => sum + item.amount, 0))}
+                        </span>
                       </div>
                     </div>
-                  </>
+
+                    <Button
+                      onClick={saveDrafts}
+                      className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 min-h-[48px] text-base font-semibold"
+                      disabled={drafts.length === 0}
+                    >
+                      <Save className="mr-2 h-4 w-4" />
+                      確認送出 {drafts.length} 筆
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
 
-            <Button
-              onClick={handleParseInput}
-              className="w-full bg-indigo-500 text-white hover:bg-indigo-400 min-h-[48px] text-base"
-              disabled={
-                (activeMode === "file_import" && (isFileParsing || !uploadedFile)) ||
-                (activeMode === "text_single" && !singleText.trim())
-              }
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              解析並前往確認
-            </Button>
+            {activeMode !== "file_import" ? (
+              <Button
+                onClick={() => handleParseInput()}
+                className="w-full bg-indigo-500 text-white hover:bg-indigo-400 min-h-[48px] text-base"
+                disabled={activeMode === "text_single" && !singleText.trim()}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                解析並前往確認
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -2645,10 +4042,7 @@ export default function MvpAccountingPage() {
   }
 
   function renderConfirm() {
-    const selectedCount = drafts.filter(item => item.selected).length
-    const singleMode =
-      (activeMode === "text_single" && importJob?.input_mode !== "bulk_text") ||
-      (activeMode === "file_import" && uploadKind === "image")
+    const selectedCount = drafts.length
 
     return (
       <div className="space-y-3 sm:space-y-4">
@@ -2687,57 +4081,6 @@ export default function MvpAccountingPage() {
           </Card>
         )}
 
-        {!singleMode && (
-          <Card className="border-white/20 bg-slate-900/70">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-white text-lg">批次套用修正</CardTitle>
-              <CardDescription className="text-slate-300">同一段資料可一鍵套用領域、收支、類別</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <select
-                  value={batchDomain}
-                  onChange={event => setBatchDomain(event.target.value as Domain)}
-                  className="rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                >
-                  <option value="unknown">領域（不變更）</option>
-                  <option value="business">生意</option>
-                  <option value="life">生活</option>
-                </select>
-                <select
-                  value={batchDirection}
-                  onChange={event => setBatchDirection(event.target.value as Direction)}
-                  className="rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                >
-                  <option value="unknown">收支（不變更）</option>
-                  <option value="income">收入</option>
-                  <option value="expense">支出</option>
-                </select>
-                <select
-                  value={batchCategory}
-                  onChange={event => setBatchCategory(event.target.value)}
-                  className="rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
-                >
-                  <option value="">類別（不變更）</option>
-                  {TAXONOMY.map(category => (
-                    <option key={category.category_key} value={category.category_key}>
-                      {categoryLabel(category.category_key)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full border-indigo-400/30 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
-                onClick={applyBatchSettings}
-              >
-                一鍵套用到勾選項目
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
         <div className="space-y-3">
           {drafts.map((draft, index) => {
             const lowConfidence = draft.ai_confidence < 0.65
@@ -2750,12 +4093,6 @@ export default function MvpAccountingPage() {
               >
                 <CardContent className="pt-4 sm:pt-6 space-y-3">
                   <div className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      className="mt-1.5 h-5 w-5 shrink-0 rounded border-white/20 bg-slate-950 accent-indigo-500"
-                      checked={draft.selected}
-                      onChange={event => updateDraft(index, item => ({ ...item, selected: event.target.checked }))}
-                    />
                     <div className="flex-1 min-w-0 space-y-2">
                       <Textarea
                         value={draft.note}
@@ -2768,28 +4105,38 @@ export default function MvpAccountingPage() {
                         }
                         className="min-h-[70px] sm:min-h-[80px] bg-slate-950/60 border-white/20 text-white text-sm"
                       />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          value={draft.amount}
-                          onChange={event =>
-                            updateDraft(index, item => ({
-                              ...item,
-                              amount: Math.max(0, Number(event.target.value) || 0),
-                              parse_error: undefined,
-                              user_overridden: true,
-                            }))
-                          }
-                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
-                          placeholder="金額"
-                        />
-                        <Input
-                          type="date"
-                          value={draft.occurred_at}
-                          onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
-                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
-                        />
+                      <div className="flex flex-col gap-2">
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-slate-500 px-0.5">金額</p>
+                          <Input
+                            type="number"
+                            min={0}
+                            data-draft-amount={index}
+                            value={draft.amount}
+                            onChange={event =>
+                              updateDraft(index, item => ({
+                                ...item,
+                                amount: Math.max(0, Number(event.target.value) || 0),
+                                parse_error: undefined,
+                                user_overridden: true,
+                              }))
+                            }
+                            className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+                            placeholder="金額"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] text-slate-500 px-0.5">日期 <span className="text-rose-400">*</span></p>
+                          <Input
+                            type="date"
+                            data-draft-date={index}
+                            value={draft.occurred_at}
+                            onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
+                            className={`w-full bg-slate-950/60 text-white min-h-[44px] [color-scheme:dark] ${
+                              !draft.occurred_at ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/20"
+                            }`}
+                          />
+                        </div>
                       </div>
                       <select
                         value={draft.category_key}
@@ -2867,6 +4214,1116 @@ export default function MvpAccountingPage() {
     )
   }
 
+  function renderStatsDetail() {
+    const today = new Date()
+    const todayStr = today.toISOString().slice(0, 10)
+
+    let rangeStart = ""
+    let rangeEnd = ""
+    let barMode: "daily" | "monthly"
+
+    if (statsTimeRange === "month") {
+      const [y, m] = selectedMonth.split("-")
+      rangeStart = `${y}-${m}-01`
+      const lastDay = new Date(Number(y), Number(m), 0).getDate()
+      rangeEnd = `${y}-${m}-${String(lastDay).padStart(2, "0")}`
+      barMode = "daily"
+    } else if (statsTimeRange === "6months") {
+      const d = new Date(today.getFullYear(), today.getMonth() - 5, 1)
+      rangeStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`
+      rangeEnd = todayStr
+      barMode = "monthly"
+    } else if (statsTimeRange === "year") {
+      rangeStart = `${statsYear}-01-01`
+      rangeEnd = `${statsYear}-12-31`
+      barMode = "monthly"
+    } else {
+      rangeStart = statsCustomStart
+      rangeEnd = statsCustomEnd
+      barMode = "monthly"
+    }
+
+    const inRange = transactions.filter(tx => {
+      if (rangeStart && tx.occurred_at < rangeStart) return false
+      if (rangeEnd && tx.occurred_at > rangeEnd) return false
+      return true
+    })
+
+    const dirFiltered = inRange.filter(tx => {
+      if (statsDetailDirection === "expense") return tx.direction === "expense"
+      if (statsDetailDirection === "income") return tx.direction === "income"
+      return true
+    })
+
+    const totalExpense = inRange.filter(tx => tx.direction === "expense").reduce((s, tx) => s + tx.amount, 0)
+    const totalIncome = inRange.filter(tx => tx.direction === "income").reduce((s, tx) => s + tx.amount, 0)
+
+    let summaryAmount: number
+    let summaryLabel: string
+    let summaryColorClass: string
+
+    if (statsDetailDirection === "expense") {
+      summaryAmount = totalExpense
+      summaryLabel = "總支出"
+      summaryColorClass = "text-rose-300"
+    } else if (statsDetailDirection === "income") {
+      summaryAmount = totalIncome
+      summaryLabel = "總收入"
+      summaryColorClass = "text-emerald-300"
+    } else {
+      summaryAmount = totalIncome - totalExpense
+      summaryLabel = "結餘"
+      summaryColorClass = summaryAmount >= 0 ? "text-emerald-300" : "text-rose-300"
+    }
+
+    const txCount = statsDetailDirection === "net" ? inRange.length : dirFiltered.length
+    const average = txCount > 0 && statsDetailDirection !== "net" ? summaryAmount / txCount : 0
+
+    // Bar chart data
+    let barData: { label: string; value: number }[] = []
+
+    if (barMode === "daily" && statsTimeRange === "month") {
+      const [y, m] = selectedMonth.split("-")
+      const daysInMonth = new Date(Number(y), Number(m), 0).getDate()
+      barData = Array.from({ length: daysInMonth }, (_, i) => {
+        const day = String(i + 1).padStart(2, "0")
+        const dateStr = `${y}-${m}-${day}`
+        const dayTxs = inRange.filter(tx => tx.occurred_at === dateStr)
+        const exp = dayTxs.filter(tx => tx.direction === "expense").reduce((s, tx) => s + tx.amount, 0)
+        const inc = dayTxs.filter(tx => tx.direction === "income").reduce((s, tx) => s + tx.amount, 0)
+        const value = statsDetailDirection === "expense" ? exp
+          : statsDetailDirection === "income" ? inc
+          : inc - exp
+        return { label: String(i + 1), value }
+      })
+    } else {
+      const months: string[] = []
+      if (statsTimeRange === "6months") {
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date(today.getFullYear(), today.getMonth() - i, 1)
+          months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`)
+        }
+      } else if (statsTimeRange === "year") {
+        for (let i = 1; i <= 12; i++) {
+          months.push(`${statsYear}-${String(i).padStart(2, "0")}`)
+        }
+      } else if (statsCustomStart && statsCustomEnd) {
+        const startDate = new Date(statsCustomStart)
+        const endDate = new Date(statsCustomEnd)
+        let cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+        while (cur <= endDate) {
+          months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`)
+          cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1)
+        }
+      }
+      barData = months.map(mk => {
+        const [, m] = mk.split("-")
+        const monthTxs = transactions.filter(tx => tx.occurred_at.slice(0, 7) === mk)
+        const exp = monthTxs.filter(tx => tx.direction === "expense").reduce((s, tx) => s + tx.amount, 0)
+        const inc = monthTxs.filter(tx => tx.direction === "income").reduce((s, tx) => s + tx.amount, 0)
+        const value = statsDetailDirection === "expense" ? exp
+          : statsDetailDirection === "income" ? inc
+          : inc - exp
+        return { label: `${Number(m)}月`, value }
+      })
+    }
+
+    const barFill = statsDetailDirection === "expense" ? "#fb7185"
+      : statsDetailDirection === "income" ? "#34d399"
+      : "#818cf8"
+
+    // Category breakdown (top 5)
+    const catMap = new Map<string, number>()
+    dirFiltered.forEach(tx => {
+      catMap.set(tx.category_key, (catMap.get(tx.category_key) ?? 0) + tx.amount)
+    })
+    const topCats = [...catMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+
+    // Grouped transaction list
+    const sortedDir = [...dirFiltered].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+    const gMap = new Map<string, Transaction[]>()
+    for (const tx of sortedDir) {
+      if (!gMap.has(tx.occurred_at)) gMap.set(tx.occurred_at, [])
+      gMap.get(tx.occurred_at)!.push(tx)
+    }
+    const filteredGroups: { date: string; label: string; items: Transaction[]; dayTotal: number }[] = []
+    for (const [date, txList] of gMap) {
+      const exp = txList.filter(t => t.direction === "expense").reduce((s, t) => s + t.amount, 0)
+      const inc = txList.filter(t => t.direction === "income").reduce((s, t) => s + t.amount, 0)
+      const dayTotal = statsDetailDirection === "expense" ? -exp
+        : statsDetailDirection === "income" ? inc
+        : inc - exp
+      filteredGroups.push({ date, label: formatDateGroup(date), items: txList, dayTotal })
+    }
+
+    const periodNavLabel = statsTimeRange === "month"
+      ? formatMonthLabel(selectedMonth)
+      : statsTimeRange === "year"
+      ? `${statsYear} 年`
+      : statsTimeRange === "6months"
+      ? `${rangeStart} 至 ${rangeEnd}`
+      : statsCustomStart && statsCustomEnd
+      ? `${statsCustomStart} ～ ${statsCustomEnd}`
+      : "請選擇日期區間"
+
+    const dirTabs: { key: StatsDirection; label: string; activeClass: string }[] = [
+      { key: "expense", label: "支出", activeClass: "bg-rose-500 text-white" },
+      { key: "income", label: "收入", activeClass: "bg-emerald-500 text-slate-950" },
+      { key: "net", label: "結餘", activeClass: "bg-indigo-500 text-white" },
+    ]
+
+    const timeTabs: { key: StatsTimeRange; label: string }[] = [
+      { key: "month", label: "月" },
+      { key: "6months", label: "近6個月" },
+      { key: "year", label: "年" },
+      { key: "custom", label: "自訂" },
+    ]
+
+    const hasChartData = barData.some(d => d.value !== 0)
+
+    return (
+      <div className="space-y-4 pb-6">
+        {/* Header */}
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => setStep("home")}
+            className="flex items-center justify-center w-9 h-9 rounded-full bg-white/8 hover:bg-white/15 border border-white/15 transition-colors shrink-0"
+          >
+            <ArrowLeft className="h-4 w-4 text-white" />
+          </button>
+          <h1 className="text-white font-semibold text-base">收支統計</h1>
+        </div>
+
+        {/* Direction tabs */}
+        <div className="flex rounded-xl bg-white/5 border border-white/10 p-1 gap-1">
+          {dirTabs.map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setStatsDetailDirection(tab.key)}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                statsDetailDirection === tab.key
+                  ? `${tab.activeClass} shadow-sm`
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Time range tabs */}
+        <div className="flex gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+          {timeTabs.map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setStatsTimeRange(tab.key)}
+              className={`px-4 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                statsTimeRange === tab.key
+                  ? "bg-amber-400 text-slate-900 font-semibold"
+                  : "bg-white/5 text-slate-300 border border-white/15 hover:bg-white/10"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Period navigation */}
+        {(statsTimeRange === "month" || statsTimeRange === "year") && (
+          <div className="flex items-center gap-2 rounded-xl bg-white/5 border border-white/10 px-3 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (statsTimeRange === "month") {
+                  setSelectedMonth(prev => shiftMonthKey(prev, -1))
+                } else {
+                  setStatsYear(prev => prev - 1)
+                }
+              }}
+              className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/15 transition-colors shrink-0"
+            >
+              <ArrowLeft className="h-3.5 w-3.5 text-white" />
+            </button>
+            <p className="flex-1 text-center text-sm font-medium text-white">{periodNavLabel}</p>
+            <button
+              type="button"
+              onClick={() => {
+                if (statsTimeRange === "month") {
+                  setSelectedMonth(prev => shiftMonthKey(prev, 1))
+                } else {
+                  setStatsYear(prev => prev + 1)
+                }
+              }}
+              className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/15 transition-colors shrink-0"
+            >
+              <ArrowRight className="h-3.5 w-3.5 text-white" />
+            </button>
+          </div>
+        )}
+
+        {statsTimeRange === "6months" && (
+          <p className="text-center text-xs text-slate-400">{periodNavLabel}</p>
+        )}
+
+        {/* Custom date range picker */}
+        {statsTimeRange === "custom" && (
+          <div className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-3">
+            <p className="text-xs text-slate-400 font-medium">自訂日期區間</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <p className="text-[10px] text-slate-500 px-0.5">開始日期</p>
+                <input
+                  type="date"
+                  value={statsCustomStart}
+                  onChange={e => setStatsCustomStart(e.target.value)}
+                  className="w-full min-w-0 bg-slate-950/60 border border-white/20 rounded-lg px-2 py-2 text-xs text-white [color-scheme:dark]"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] text-slate-500 px-0.5">結束日期</p>
+                <input
+                  type="date"
+                  value={statsCustomEnd}
+                  onChange={e => setStatsCustomEnd(e.target.value)}
+                  min={statsCustomStart}
+                  className="w-full min-w-0 bg-slate-950/60 border border-white/20 rounded-lg px-2 py-2 text-xs text-white [color-scheme:dark]"
+                />
+              </div>
+            </div>
+            {statsCustomStart && statsCustomEnd && statsCustomStart <= statsCustomEnd && (
+              <p className="text-[10px] text-slate-500 text-center">
+                {statsCustomStart} ～ {statsCustomEnd}
+              </p>
+            )}
+            {statsCustomStart && statsCustomEnd && statsCustomStart > statsCustomEnd && (
+              <p className="text-[10px] text-rose-400 text-center">開始日期不能晚於結束日期</p>
+            )}
+          </div>
+        )}
+
+        {/* Summary card */}
+        <Card className="border-white/15 bg-slate-900/70 overflow-hidden">
+          <CardContent className="pt-5 pb-5">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-400 mb-1">{summaryLabel}</p>
+                <p className={`text-3xl font-bold tracking-tight ${summaryColorClass}`}>
+                  {statsDetailDirection === "net" && summaryAmount > 0 ? "+" : ""}
+                  {formatMoney(summaryAmount)}
+                </p>
+                {statsDetailDirection !== "net" ? (
+                  <div className="flex items-center gap-3 mt-2">
+                    <span className="text-xs text-slate-400">{txCount} 筆</span>
+                    {txCount > 0 && (
+                      <>
+                        <span className="text-slate-600">·</span>
+                        <span className="text-xs text-slate-400">均 {formatMoney(average)}</span>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 mt-2">
+                    <span className="text-xs text-rose-300/80">支出 {formatMoney(totalExpense)}</span>
+                    <span className="text-slate-600">·</span>
+                    <span className="text-xs text-emerald-300/80">收入 {formatMoney(totalIncome)}</span>
+                  </div>
+                )}
+              </div>
+              <div className={`text-5xl opacity-15 shrink-0 ${summaryColorClass}`}>
+                {statsDetailDirection === "expense" ? "💸" : statsDetailDirection === "income" ? "💰" : "📊"}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* View mode toggle: chart / calendar */}
+        <div className="flex items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={() => setStatsViewMode("chart")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-l-lg text-xs font-medium border transition-colors ${
+              statsViewMode === "chart"
+                ? "bg-white/10 border-white/20 text-white"
+                : "bg-transparent border-white/10 text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            圖表
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStatsViewMode("calendar")
+              setCalendarMonth(selectedMonth)
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-r-lg text-xs font-medium border border-l-0 transition-colors ${
+              statsViewMode === "calendar"
+                ? "bg-white/10 border-white/20 text-white"
+                : "bg-transparent border-white/10 text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            行事曆
+          </button>
+        </div>
+
+        {/* Bar chart (chart mode) */}
+        {statsViewMode === "chart" && barData.length > 0 && (
+          <Card className="border-white/15 bg-slate-900/70">
+            <CardContent className="pt-4 pb-3 px-3">
+              {!hasChartData ? (
+                <div className="py-8 text-center">
+                  <p className="text-xs text-slate-500">此期間無資料</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart
+                    data={barData}
+                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                    barCategoryGap={barMode === "daily" ? "8%" : "24%"}
+                  >
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fill: "#64748b", fontSize: 9 }}
+                      axisLine={false}
+                      tickLine={false}
+                      interval={barMode === "daily" ? 4 : 0}
+                    />
+                    <YAxis
+                      tick={{ fill: "#64748b", fontSize: 9 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => {
+                        const abs = Math.abs(v)
+                        if (abs >= 10000) return `${(v / 10000).toFixed(0)}萬`
+                        if (abs >= 1000) return `${(v / 1000).toFixed(0)}k`
+                        return String(v)
+                      }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#0f172a",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "10px",
+                        padding: "8px 12px",
+                      }}
+                      labelStyle={{ color: "#94a3b8", fontSize: "11px", marginBottom: "2px" }}
+                      formatter={(value: number) => [formatMoney(value), summaryLabel]}
+                      itemStyle={{ color: barFill, fontSize: "12px", fontWeight: 600 }}
+                      cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                    />
+                    {statsDetailDirection === "net" && (
+                      <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" strokeDasharray="4 3" />
+                    )}
+                    <Bar dataKey="value" fill={barFill} radius={[3, 3, 0, 0]} maxBarSize={36} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Calendar view (calendar mode) */}
+        {statsViewMode === "calendar" && (() => {
+          const [calY, calM] = calendarMonth.split("-").map(Number)
+          const daysInCalMonth = new Date(calY, calM, 0).getDate()
+          const firstDayOfWeek = new Date(calY, calM - 1, 1).getDay()
+          const startOffset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1
+          const calTodayStr = new Date().toISOString().slice(0, 10)
+
+          const dayAmounts: Map<number, { expense: number; income: number }> = new Map()
+          for (let d = 1; d <= daysInCalMonth; d++) {
+            const dateStr = `${calY}-${String(calM).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+            const dayTxs = transactions.filter(tx => tx.occurred_at === dateStr)
+            const expense = dayTxs.filter(tx => tx.direction === "expense").reduce((s, tx) => s + tx.amount, 0)
+            const income = dayTxs.filter(tx => tx.direction === "income").reduce((s, tx) => s + tx.amount, 0)
+            if (expense > 0 || income > 0) dayAmounts.set(d, { expense, income })
+          }
+
+          const calMonthExpense = [...dayAmounts.values()].reduce((s, v) => s + v.expense, 0)
+          const calMonthIncome = [...dayAmounts.values()].reduce((s, v) => s + v.income, 0)
+          const calMonthNet = calMonthIncome - calMonthExpense
+          const weekdayHeaders = ["一", "二", "三", "四", "五", "六", "日"]
+
+          return (
+            <Card className="border-white/15 bg-slate-900/70">
+              <CardContent className="pt-4 pb-4 px-3 space-y-3">
+                {/* Calendar month nav */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCalendarMonth(prev => shiftMonthKey(prev, -1))}
+                    className="w-7 h-7 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/15 transition-colors shrink-0"
+                  >
+                    <ArrowLeft className="h-3 w-3 text-white" />
+                  </button>
+                  <p className="flex-1 text-center text-sm font-semibold text-white">{calY} 年 {calM} 月</p>
+                  <button
+                    type="button"
+                    onClick={() => setCalendarMonth(prev => shiftMonthKey(prev, 1))}
+                    className="w-7 h-7 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/15 transition-colors shrink-0"
+                  >
+                    <ArrowRight className="h-3 w-3 text-white" />
+                  </button>
+                </div>
+
+                {/* Weekday header */}
+                <div className="grid grid-cols-7 gap-px">
+                  {weekdayHeaders.map(wd => (
+                    <div key={wd} className="text-center text-[10px] text-slate-500 font-medium py-1">{wd}</div>
+                  ))}
+                </div>
+
+                {/* Day cells */}
+                <div className="grid grid-cols-7 gap-px">
+                  {Array.from({ length: startOffset }).map((_, i) => (
+                    <div key={`empty-${i}`} className="h-14 sm:h-16" />
+                  ))}
+                  {Array.from({ length: daysInCalMonth }, (_, i) => {
+                    const day = i + 1
+                    const dateStr = `${calY}-${String(calM).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+                    const isToday = dateStr === calTodayStr
+                    const amounts = dayAmounts.get(day)
+                    const dayVal = amounts
+                      ? statsDetailDirection === "expense" ? amounts.expense
+                        : statsDetailDirection === "income" ? amounts.income
+                        : amounts.income - amounts.expense
+                      : 0
+
+                    return (
+                      <div
+                        key={day}
+                        className={`h-14 sm:h-16 rounded-lg flex flex-col items-center pt-1 transition-colors ${
+                          isToday ? "bg-amber-400/15 border border-amber-400/40" : "hover:bg-white/5"
+                        }`}
+                      >
+                        <span className={`text-[11px] leading-none font-medium ${
+                          isToday ? "text-amber-300" : "text-slate-300"
+                        }`}>
+                          {day}
+                        </span>
+                        {amounts && (
+                          <div className="flex flex-col items-center gap-0.5 mt-auto mb-1">
+                            {dayVal !== 0 && (
+                              <span className={`text-[8px] sm:text-[9px] leading-none font-medium truncate max-w-full px-0.5 ${
+                                statsDetailDirection === "expense" ? "text-rose-400"
+                                  : statsDetailDirection === "income" ? "text-emerald-400"
+                                  : dayVal >= 0 ? "text-emerald-400" : "text-rose-400"
+                              }`}>
+                                {Math.abs(dayVal) >= 10000
+                                  ? `${(dayVal / 10000).toFixed(1)}萬`
+                                  : Math.abs(dayVal) >= 1000
+                                  ? `${(dayVal / 1000).toFixed(0)}k`
+                                  : formatMoney(dayVal)}
+                              </span>
+                            )}
+                            <div className="flex gap-0.5">
+                              {amounts.expense > 0 && <span className="w-1 h-1 rounded-full bg-rose-400" />}
+                              {amounts.income > 0 && <span className="w-1 h-1 rounded-full bg-emerald-400" />}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Monthly total bar */}
+                <div className="flex items-center justify-between text-[11px] border-t border-white/10 pt-2.5 mt-1">
+                  <span className="text-rose-300">支出：{formatMoney(calMonthExpense)}</span>
+                  <span className="text-emerald-300">收入：{formatMoney(calMonthIncome)}</span>
+                  <span className={calMonthNet >= 0 ? "text-emerald-200" : "text-rose-200"}>
+                    結餘：{calMonthNet > 0 ? "+" : ""}{formatMoney(calMonthNet)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })()}
+
+        {/* Category breakdown */}
+        {statsDetailDirection !== "net" && topCats.length > 0 && (
+          <Card className="border-white/15 bg-slate-900/70">
+            <CardContent className="pt-4 pb-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">類別分布</p>
+              {topCats.map(([key, total]) => {
+                const pct = summaryAmount > 0 ? (total / summaryAmount) * 100 : 0
+                return (
+                  <div key={key} className="flex items-center gap-2.5">
+                    <p className="text-xs text-slate-200 w-20 shrink-0 truncate">{categoryLabel(key)}</p>
+                    <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          statsDetailDirection === "expense" ? "bg-rose-400" : "bg-emerald-400"
+                        }`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-slate-300 w-20 text-right shrink-0 font-medium">{formatMoney(total)}</p>
+                  </div>
+                )
+              })}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Transaction list */}
+        {filteredGroups.length === 0 ? (
+          <div className="rounded-xl border border-white/10 bg-slate-900/50 py-12 text-center">
+            <p className="text-slate-500 text-sm">此期間沒有紀錄</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredGroups.map(group => (
+              <div key={group.date}>
+                <div className="flex items-center justify-between px-1 mb-1.5">
+                  <p className="text-xs font-medium text-slate-300">{group.label}</p>
+                  {group.dayTotal !== 0 && (
+                    <p className={`text-xs font-medium ${group.dayTotal >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                      {group.dayTotal > 0 ? "+" : ""}
+                      {formatMoney(group.dayTotal)}
+                    </p>
+                  )}
+                </div>
+                <Card className="border-white/10 bg-slate-900/70">
+                  <CardContent className="p-0 divide-y divide-white/5">
+                    {group.items.map(item => (
+                      <div key={item.id} className="flex items-center gap-3 px-3 py-2.5">
+                        <div className="shrink-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                          <span className="text-xs">{item.direction === "expense" ? "💸" : "💰"}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white truncate">{item.note}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{categoryLabel(item.category_key)}</p>
+                        </div>
+                        <p className={`text-sm font-semibold shrink-0 ${item.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
+                          {item.direction === "expense" ? "-" : "+"}
+                          {formatMoney(item.amount)}
+                        </p>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderRecurringManager() {
+    const today = new Date().toISOString().slice(0, 10)
+    const sortedRecurringEntries = [...recurringEntries].sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+      return b.updated_at.localeCompare(a.updated_at)
+    })
+
+    return (
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            variant="outline"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
+            onClick={() => {
+              setStep("home")
+              resetRecurringForm(recurringForm.direction)
+            }}
+          >
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
+            回到主頁
+          </Button>
+          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10 text-xs shrink-0">
+            可執行 {recurringSummary.active_with_remaining}/{recurringSummary.total}
+          </Badge>
+        </div>
+
+        <Card className="border-white/20 bg-slate-900/70">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-white text-base sm:text-lg">固定收支管理</CardTitle>
+            <CardDescription className="text-slate-300 text-xs sm:text-sm">
+              支援每週、每月、每年排程，可逐筆即時開關，並設定到期是否自動記帳。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-center">
+              <p className="text-[10px] text-slate-400">可執行</p>
+              <p className="text-sm font-semibold text-white">{recurringSummary.active_with_remaining}</p>
+            </div>
+            <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-2 py-2 text-center">
+              <p className="text-[10px] text-emerald-200/80">自動記帳</p>
+              <p className="text-sm font-semibold text-emerald-100">{recurringSummary.auto}</p>
+            </div>
+            <div className="rounded-lg border border-amber-300/25 bg-amber-500/10 px-2 py-2 text-center">
+              <p className="text-[10px] text-amber-200/80">今日到期</p>
+              <p className="text-sm font-semibold text-amber-100">{recurringSummary.dueToday}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-white/20 bg-slate-900/70">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-white text-base sm:text-lg">
+                {recurringEditingId ? "編輯固定收支" : "新增固定收支"}
+              </CardTitle>
+              {recurringEditingId && (
+                <Badge variant="outline" className="border-amber-300/40 bg-amber-500/10 text-amber-100 text-[10px]">
+                  編輯中
+                </Badge>
+              )}
+            </div>
+            <CardDescription className="text-slate-300 text-xs sm:text-sm">
+              建議先填「名稱、金額、頻率」，其餘可後續再調整。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Input
+              value={recurringForm.title}
+              onChange={event => setRecurringForm(previous => ({ ...previous, title: event.target.value }))}
+              className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+              placeholder="名稱（例如：店租、薪資、保險）"
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className={`min-h-[40px] text-xs ${
+                  recurringForm.direction === "expense"
+                    ? "border-rose-300/60 bg-rose-500/20 text-rose-100"
+                    : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                }`}
+                onClick={() =>
+                  setRecurringForm(previous => ({
+                    ...previous,
+                    direction: "expense",
+                    category_key: "life_expense_other",
+                  }))
+                }
+              >
+                固定支出
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className={`min-h-[40px] text-xs ${
+                  recurringForm.direction === "income"
+                    ? "border-emerald-300/60 bg-emerald-500/20 text-emerald-100"
+                    : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                }`}
+                onClick={() =>
+                  setRecurringForm(previous => ({
+                    ...previous,
+                    direction: "income",
+                    category_key: "life_income_other",
+                  }))
+                }
+              >
+                固定收入
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Input
+                type="number"
+                min={1}
+                value={recurringForm.amount}
+                onChange={event => setRecurringForm(previous => ({ ...previous, amount: event.target.value }))}
+                className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+                placeholder="固定金額"
+              />
+              <select
+                value={recurringForm.category_key}
+                onChange={event => setRecurringForm(previous => ({ ...previous, category_key: event.target.value }))}
+                className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2.5 text-sm text-white min-h-[44px]"
+              >
+                {recurringCategories.map(category => (
+                  <option key={category.category_key} value={category.category_key}>
+                    {categoryLabel(category.category_key)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <Input
+              value={recurringForm.note}
+              onChange={event => setRecurringForm(previous => ({ ...previous, note: event.target.value }))}
+              className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+              placeholder="備註（可選，若留空將使用名稱）"
+            />
+
+            <div className="space-y-2">
+              <p className="text-[11px] text-slate-400 px-0.5">重複頻率</p>
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={`min-h-[38px] text-xs ${
+                    recurringForm.frequency === "weekly"
+                      ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                  }`}
+                  onClick={() => setRecurringForm(previous => ({ ...previous, frequency: "weekly" }))}
+                >
+                  每週
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={`min-h-[38px] text-xs ${
+                    recurringForm.frequency === "monthly"
+                      ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                  }`}
+                  onClick={() => setRecurringForm(previous => ({ ...previous, frequency: "monthly" }))}
+                >
+                  每月
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={`min-h-[38px] text-xs ${
+                    recurringForm.frequency === "yearly"
+                      ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                  }`}
+                  onClick={() => setRecurringForm(previous => ({ ...previous, frequency: "yearly" }))}
+                >
+                  每年
+                </Button>
+              </div>
+
+              {recurringForm.frequency === "weekly" && (
+                <div className="grid grid-cols-7 gap-1.5 rounded-lg border border-white/10 bg-white/5 p-2">
+                  {RECURRING_WEEKDAY_OPTIONS.map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setRecurringForm(previous => ({ ...previous, weekly_day: option.value }))}
+                      className={`min-h-[34px] rounded-md text-xs font-medium transition-colors ${
+                        recurringForm.weekly_day === option.value
+                          ? "bg-indigo-500 text-white"
+                          : "bg-slate-950/70 text-slate-300 hover:bg-white/10"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {recurringForm.frequency === "monthly" && (
+                <div className="rounded-lg border border-white/10 bg-white/5 p-2.5 space-y-1.5">
+                  <p className="text-[10px] text-slate-400">每月幾號（1-31，超過當月天數會自動取月底）</p>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={recurringForm.monthly_day}
+                    onChange={event =>
+                      setRecurringForm(previous => ({
+                        ...previous,
+                        monthly_day: clampInteger(Number(event.target.value), 1, 31),
+                      }))
+                    }
+                    className="bg-slate-950/60 border-white/20 text-white min-h-[40px]"
+                  />
+                </div>
+              )}
+
+              {recurringForm.frequency === "yearly" && (
+                <div className="rounded-lg border border-white/10 bg-white/5 p-2.5 space-y-1.5">
+                  <p className="text-[10px] text-slate-400">每年什麼時候（例如 12/25）</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={recurringForm.yearly_month}
+                      onChange={event =>
+                        setRecurringForm(previous => ({
+                          ...previous,
+                          yearly_month: clampInteger(Number(event.target.value), 1, 12),
+                        }))
+                      }
+                      className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white min-h-[40px]"
+                    >
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map(month => (
+                        <option key={month} value={month}>
+                          {month} 月
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={recurringForm.yearly_day}
+                      onChange={event =>
+                        setRecurringForm(previous => ({
+                          ...previous,
+                          yearly_day: clampInteger(Number(event.target.value), 1, 31),
+                        }))
+                      }
+                      className="bg-slate-950/60 border-white/20 text-white min-h-[40px]"
+                      placeholder="幾號"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-white/10 bg-white/5 p-2.5 space-y-2">
+              <p className="text-[11px] text-slate-400">執行次數</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={`min-h-[38px] text-xs ${
+                    recurringForm.occurrence_mode === "unlimited"
+                      ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                  }`}
+                  onClick={() => setRecurringForm(previous => ({ ...previous, occurrence_mode: "unlimited" }))}
+                >
+                  無限次（預設）
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={`min-h-[38px] text-xs ${
+                    recurringForm.occurrence_mode === "limited"
+                      ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                  }`}
+                  onClick={() => setRecurringForm(previous => ({ ...previous, occurrence_mode: "limited" }))}
+                >
+                  指定次數
+                </Button>
+              </div>
+              {recurringForm.occurrence_mode === "limited" && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-slate-500">最多可設定 {MAX_RECURRING_OCCURRENCES} 次</p>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={MAX_RECURRING_OCCURRENCES}
+                    value={recurringForm.occurrence_limit}
+                    onChange={event =>
+                      setRecurringForm(previous => ({
+                        ...previous,
+                        occurrence_limit: clampInteger(Number(event.target.value), 1, MAX_RECURRING_OCCURRENCES),
+                      }))
+                    }
+                    className="bg-slate-950/60 border-white/20 text-white min-h-[40px]"
+                    placeholder={`1 - ${MAX_RECURRING_OCCURRENCES}`}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <p className="text-[10px] text-slate-500 px-0.5">開始生效日</p>
+                <Input
+                  type="date"
+                  value={recurringForm.start_date}
+                  onChange={event => setRecurringForm(previous => ({ ...previous, start_date: event.target.value }))}
+                  className="bg-slate-950/60 border-white/20 text-white min-h-[44px] [color-scheme:dark]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRecurringForm(previous => ({ ...previous, enabled: !previous.enabled }))}
+                  className={`rounded-md border min-h-[44px] text-xs font-medium transition-colors ${
+                    recurringForm.enabled
+                      ? "border-emerald-300/35 bg-emerald-500/15 text-emerald-100"
+                      : "border-white/20 bg-white/5 text-slate-300"
+                  }`}
+                >
+                  {recurringForm.enabled ? "已啟用" : "已停用"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecurringForm(previous => ({ ...previous, auto_record: !previous.auto_record }))}
+                  className={`rounded-md border min-h-[44px] text-xs font-medium transition-colors ${
+                    recurringForm.auto_record
+                      ? "border-indigo-300/35 bg-indigo-500/15 text-indigo-100"
+                      : "border-white/20 bg-white/5 text-slate-300"
+                  }`}
+                >
+                  自動記帳：{recurringForm.auto_record ? "開" : "關"}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                className="bg-indigo-500 text-white hover:bg-indigo-400 min-h-[42px] text-sm"
+                onClick={saveRecurringSetting}
+              >
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                {recurringEditingId ? "更新設定" : "儲存設定"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[42px] text-sm"
+                onClick={() => resetRecurringForm(recurringForm.direction)}
+              >
+                {recurringEditingId ? "取消編輯" : "清空"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-3">
+          {sortedRecurringEntries.length === 0 ? (
+            <Card className="border-white/15 bg-slate-900/70">
+              <CardContent className="pt-6">
+                <p className="text-sm text-slate-300">尚未建立固定收支設定，先新增一筆吧。</p>
+              </CardContent>
+            </Card>
+          ) : (
+            sortedRecurringEntries.map(rule => {
+              const recordedCount = recurringRecordedCountById.get(rule.id) ?? 0
+              const remainingCount = remainingRecurringOccurrences(rule, recordedCount)
+              const hasRemaining = remainingCount !== 0
+              const loggedToday = recurringRecordLogs.some(
+                item => item.recurring_id === rule.id && item.occurred_at === today
+              )
+              const nextDueDate = hasRemaining ? findNextRecurringDueDate(rule, today) : null
+              const latestLog = latestRecurringLogById.get(rule.id)
+              const isEditing = recurringEditingId === rule.id
+              return (
+                <Card key={rule.id} className="border-white/15 bg-slate-900/70">
+                  <CardContent className="pt-5 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm text-white break-words">{rule.title}</p>
+                        <p className="text-[10px] text-slate-400 mt-1 break-words">{categoryLabel(rule.category_key)}</p>
+                      </div>
+                      <p className={`text-sm font-semibold shrink-0 ${rule.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
+                        {rule.direction === "expense" ? "-" : "+"}
+                        {formatMoney(rule.amount)}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className="border-white/20 text-slate-200 text-[10px]">
+                        {recurringRuleLabel(rule)}
+                      </Badge>
+                      <Badge variant="outline" className="border-white/20 text-slate-300 text-[10px]">
+                        生效：{rule.start_date}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] ${
+                          rule.enabled
+                            ? "border-emerald-300/35 text-emerald-100 bg-emerald-500/10"
+                            : "border-white/20 text-slate-300"
+                        }`}
+                      >
+                        {rule.enabled ? "啟用中" : "停用中"}
+                      </Badge>
+                      {!hasRemaining && (
+                        <Badge variant="outline" className="border-amber-300/35 text-amber-100 bg-amber-500/10 text-[10px]">
+                          已達次數上限
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-[11px] text-slate-300 space-y-1">
+                      <p>下次排程：{hasRemaining ? (nextDueDate ?? "無法判定") : "已完成"}</p>
+                      <p>
+                        最近記錄：{latestLog ? `${latestLog.occurred_at}（${latestLog.source === "auto" ? "自動" : "手動"}）` : "尚無記錄"}
+                      </p>
+                      <p>
+                        執行次數：
+                        {rule.occurrence_limit === null
+                          ? `無限次（已執行 ${recordedCount} 次）`
+                          : `${rule.occurrence_limit} 次（已執行 ${recordedCount} 次，剩餘 ${remainingCount} 次）`}
+                      </p>
+                      <p>到期自動記帳：{rule.auto_record ? "開啟" : "關閉"}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={`min-h-[38px] text-xs ${
+                          rule.enabled
+                            ? "border-rose-300/35 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+                            : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+                        }`}
+                        onClick={() => toggleRecurringRuleEnabled(rule.id)}
+                      >
+                        {rule.enabled ? "立即停用" : "立即啟用"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={`min-h-[38px] text-xs ${
+                          rule.auto_record
+                            ? "border-indigo-300/35 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                            : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                        }`}
+                        onClick={() => toggleRecurringRuleAutoRecord(rule.id)}
+                      >
+                        自動記帳：{rule.auto_record ? "開" : "關"}
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={`min-h-[38px] text-xs ${
+                          isEditing
+                            ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
+                            : "border-white/20 bg-white/5 text-white hover:bg-white/10"
+                        }`}
+                        onClick={() => startEditRecurring(rule)}
+                      >
+                        {isEditing ? "編輯中" : "編輯"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={`min-h-[38px] text-xs ${
+                          !hasRemaining || loggedToday
+                            ? "border-white/15 bg-white/5 text-slate-500 cursor-not-allowed"
+                            : "border-indigo-300/30 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                        }`}
+                        disabled={!hasRemaining || loggedToday}
+                        onClick={() => recordRecurringNow(rule)}
+                      >
+                        {!hasRemaining ? "已達上限" : loggedToday ? "今天已記錄" : "立即記一筆"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-[38px] text-xs border-rose-300/35 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+                        onClick={() => removeRecurringRule(rule.id)}
+                      >
+                        刪除
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-[100dvh] bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white">
       <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between backdrop-blur-sm bg-white/5 sticky top-0 z-30 safe-top">
@@ -2896,8 +5353,11 @@ export default function MvpAccountingPage() {
         )}
 
         {step === "home" && renderHome()}
+        {step === "stats-detail" && renderStatsDetail()}
+        {step === "new-entry" && renderNewEntry()}
         {step === "overview" && renderOverview()}
         {step === "analysis" && renderAnalysis()}
+        {step === "recurring" && renderRecurringManager()}
         {step === "quick-add" && renderQuickAdd()}
         {step === "confirm" && renderConfirm()}
       </main>
@@ -2908,8 +5368,15 @@ export default function MvpAccountingPage() {
             size="lg"
             className="h-14 w-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-900/50 active:scale-95 transition-transform"
             onClick={() => {
-              setModeSheetOpen(true)
+              setEntryEditingId(null)
+              setEntryDirection("expense")
+              setEntryCategory("")
+              setEntryCalcDisplay("0")
+              setEntryNote("")
+              setEntryDate(new Date().toISOString().slice(0, 10))
+              setEntryAdvancedMode("none")
               setBanner(null)
+              setStep("new-entry")
             }}
             aria-label="新增交易"
           >

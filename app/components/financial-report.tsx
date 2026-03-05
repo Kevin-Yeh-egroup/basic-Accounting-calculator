@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
-import { Copy, Check } from "lucide-react"
+import { Copy, Check, FileSpreadsheet } from "lucide-react"
 
 interface Income {
   date: string
@@ -37,8 +37,9 @@ interface FinancialReportProps {
   expenses: Expense[]
 }
 
-export default function FinancialReport({ incomes, expenses }: FinancialReportProps) {
+export default function FinancialReport({ incomes, expenses }: Readonly<FinancialReportProps>) {
   const [copied, setCopied] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
 
   // 收入分類統計
   const salaryIncome = incomes
@@ -206,6 +207,11 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
     rotatingExpense +
     otherLoanExpense
 
+  const overallIncome = totalPersonalIncome + (hasBusiness ? businessRevenue : 0)
+  const overallExpense =
+    totalPersonalExpense + totalLoanExpense + (hasBusiness ? businessFixedExpense + businessVariableExpense : 0)
+  const overallNet = overallIncome - overallExpense
+
   const copyToClipboard = () => {
     let content = "財務月報表\n\n"
 
@@ -253,20 +259,144 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
     })
   }
 
+  const exportToExcel = async () => {
+    if (isExporting) return
+    setIsExporting(true)
+
+    try {
+      const XLSX = await import("xlsx")
+
+      const summaryRows: Array<{ 分類: string; 項目: string; 金額: number }> = [
+        { 分類: "家庭收入", 項目: "工資", 金額: salaryIncome },
+        { 分類: "家庭收入", 項目: "非工資", 金額: nonSalaryIncome },
+        { 分類: "家庭收入", 項目: "家人提供", 金額: familySupport },
+        { 分類: "家庭收入", 項目: "借款", 金額: loanIncome },
+        { 分類: "家庭收入", 項目: "其他", 金額: otherIncome },
+        { 分類: "家庭收入", 項目: "低收補助", 金額: Math.floor(subsidyIncome * 0.6) },
+        { 分類: "家庭收入", 項目: "身障補助", 金額: Math.floor(subsidyIncome * 0.4) },
+        { 分類: "家庭收入", 項目: "總收入", 金額: totalPersonalIncome },
+        { 分類: "支出", 項目: "食", 金額: foodExpense },
+        { 分類: "支出", 項目: "衣", 金額: clothingExpense },
+        { 分類: "支出", 項目: "住", 金額: housingExpense },
+        { 分類: "支出", 項目: "行", 金額: transportExpense },
+        { 分類: "支出", 項目: "育", 金額: educationExpense },
+        { 分類: "支出", 項目: "樂", 金額: entertainmentExpense },
+        { 分類: "支出", 項目: "電信", 金額: telecomExpense },
+        { 分類: "支出", 項目: "保險", 金額: insuranceExpense },
+        { 分類: "支出", 項目: "儲蓄", 金額: savingsExpense },
+        { 分類: "支出", 項目: "醫療", 金額: medicalExpense },
+        { 分類: "支出", 項目: "孝養", 金額: familyCareExpense },
+        { 分類: "支出", 項目: "捐款", 金額: donationExpense },
+        { 分類: "支出", 項目: "稅金", 金額: taxExpense },
+        { 分類: "貸款支出", 項目: "信用卡", 金額: creditCardExpense },
+        { 分類: "貸款支出", 項目: "信貸", 金額: personalLoanExpense },
+        { 分類: "貸款支出", 項目: "房貸", 金額: mortgageExpense },
+        { 分類: "貸款支出", 項目: "車貸", 金額: carLoanExpense },
+        { 分類: "貸款支出", 項目: "親友", 金額: friendLoanExpense },
+        { 分類: "貸款支出", 項目: "當鋪", 金額: pawnshopExpense },
+        { 分類: "貸款支出", 項目: "互助會死會", 金額: rotatingExpense },
+        { 分類: "貸款支出", 項目: "其他貸款", 金額: otherLoanExpense },
+        { 分類: "支出總計", 項目: "生活支出", 金額: totalPersonalExpense },
+        { 分類: "支出總計", 項目: "貸款支出", 金額: totalLoanExpense },
+        { 分類: "支出總計", 項目: "總支出", 金額: totalPersonalExpense + totalLoanExpense },
+      ]
+
+      if (hasBusiness) {
+        summaryRows.push(
+          { 分類: "營業收入", 項目: "營業額", 金額: businessRevenue },
+          { 分類: "營業支出", 項目: "營業固定支出", 金額: businessFixedExpense },
+          { 分類: "營業支出", 項目: "營業變動支出", 金額: businessVariableExpense },
+          { 分類: "營業支出", 項目: "店租", 金額: rentExpense },
+          { 分類: "營業支出", 項目: "水電", 金額: utilitiesExpense },
+          { 分類: "營業支出", 項目: "進貨", 金額: purchaseExpense },
+          { 分類: "營業支出", 項目: "原物料", 金額: materialExpense },
+          { 分類: "營業支出", 項目: "薪資", 金額: salaryExpense },
+          { 分類: "營業支出", 項目: "行銷廣告", 金額: marketingExpense },
+          { 分類: "營業支出", 項目: "設備", 金額: equipmentExpense },
+          { 分類: "營業支出", 項目: "總營業支出", 金額: businessFixedExpense + businessVariableExpense },
+        )
+      }
+
+      summaryRows.push(
+        { 分類: "收支總結", 項目: "總收入", 金額: overallIncome },
+        { 分類: "收支總結", 項目: "總支出", 金額: overallExpense },
+        { 分類: "收支總結", 項目: "淨收支", 金額: overallNet },
+      )
+
+      const incomeRows =
+        incomes.length > 0
+          ? incomes.map((item) => ({
+              日期: item.date,
+              類別: item.category,
+              收入分類: item.type,
+              內容: item.description,
+              單價: item.unitPrice,
+              數量: item.quantity,
+              小計: item.subtotal,
+              付款狀態: item.paymentStatus,
+              備註: item.customerNote ?? "",
+            }))
+          : [{ 訊息: "本月無收入資料" }]
+
+      const expenseRows =
+        expenses.length > 0
+          ? expenses.map((item) => ({
+              日期: item.date,
+              類別: item.category,
+              支出分類: item.expenseCategory,
+              內容: item.description,
+              單價: item.unitPrice,
+              數量: item.quantity,
+              小計: item.subtotal,
+            }))
+          : [{ 訊息: "本月無支出資料" }]
+
+      const workbook = XLSX.utils.book_new()
+      const summarySheet = XLSX.utils.json_to_sheet(summaryRows)
+      summarySheet["!cols"] = [{ wch: 14 }, { wch: 22 }, { wch: 14 }]
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "月報摘要")
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(incomeRows), "收入明細")
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(expenseRows), "支出明細")
+
+      const now = new Date()
+      const dateText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+      XLSX.writeFile(workbook, `財務月報表-${dateText}.xlsx`, { compression: true })
+    } catch (error) {
+      console.error("匯出 Excel 失敗", error)
+      if (globalThis.window !== undefined) {
+        globalThis.window.alert("匯出 Excel 失敗，請稍後再試。")
+      }
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span>財務月報表</span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={copyToClipboard}
-            className="flex w-full items-center justify-center gap-1 sm:w-auto"
-          >
-            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            {copied ? "已複製" : "複製報表"}
-          </Button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={copyToClipboard}
+              className="flex w-full items-center justify-center gap-1 sm:w-auto"
+            >
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? "已複製" : "複製報表"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportToExcel}
+              disabled={isExporting}
+              className="flex w-full items-center justify-center gap-1 sm:w-auto"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              {isExporting ? "匯出中..." : "匯出 Excel"}
+            </Button>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -540,43 +670,16 @@ export default function FinancialReport({ incomes, expenses }: FinancialReportPr
               <TableBody>
                 <TableRow>
                   <TableCell>總收入</TableCell>
-                  <TableCell className="text-green-600">
-                    ${(totalPersonalIncome + (hasBusiness ? businessRevenue : 0)).toLocaleString()}
-                  </TableCell>
+                  <TableCell className="text-green-600">${overallIncome.toLocaleString()}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>總支出</TableCell>
-                  <TableCell className="text-red-600">
-                    $
-                    {(
-                      totalPersonalExpense +
-                      totalLoanExpense +
-                      (hasBusiness ? businessFixedExpense + businessVariableExpense : 0)
-                    ).toLocaleString()}
-                  </TableCell>
+                  <TableCell className="text-red-600">${overallExpense.toLocaleString()}</TableCell>
                 </TableRow>
                 <TableRow className="bg-gray-50">
                   <TableCell className="font-bold">淨收支</TableCell>
-                  <TableCell
-                    className={`font-bold ${
-                      totalPersonalIncome +
-                        (hasBusiness ? businessRevenue : 0) -
-                        (totalPersonalExpense +
-                          totalLoanExpense +
-                          (hasBusiness ? businessFixedExpense + businessVariableExpense : 0)) >=
-                      0
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    $
-                    {(
-                      totalPersonalIncome +
-                      (hasBusiness ? businessRevenue : 0) -
-                      (totalPersonalExpense +
-                        totalLoanExpense +
-                        (hasBusiness ? businessFixedExpense + businessVariableExpense : 0))
-                    ).toLocaleString()}
+                  <TableCell className={`font-bold ${overallNet >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    ${overallNet.toLocaleString()}
                   </TableCell>
                 </TableRow>
               </TableBody>
