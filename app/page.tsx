@@ -21,6 +21,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
+import CashFlowAnalysis from "./components/cash-flow-analysis"
+import FinancialReport from "./components/financial-report"
 
 type Domain = "business" | "life" | "unknown"
 type Direction = "income" | "expense" | "unknown"
@@ -28,7 +30,7 @@ type InputMode = "text_single" | "voice_single" | "photo_single" | "bulk_text" |
 type UploadKind = "none" | "image" | "document"
 type OverviewDirectionFilter = "all" | "income" | "expense"
 type ImportJobStatus = "uploaded" | "parsed" | "mapped" | "ready_to_import" | "imported" | "failed"
-type PageStep = "home" | "quick-add" | "confirm" | "overview"
+type PageStep = "home" | "quick-add" | "confirm" | "overview" | "analysis"
 
 interface TaxonomyCategory {
   category_key: string
@@ -102,6 +104,31 @@ interface TransactionEditDraft {
   amount: string
   category_key: string
   note: string
+}
+
+interface LegacyIncome {
+  date: string
+  weather?: string
+  customerCount?: number
+  category: string
+  type: string
+  description: string
+  unitPrice: number
+  quantity: number
+  paymentStatus: string
+  subtotal: number
+  customerNote?: string
+}
+
+interface LegacyExpense {
+  date: string
+  category: string
+  expenseCategory: string
+  type: string
+  description: string
+  unitPrice: number
+  quantity: number
+  subtotal: number
 }
 
 type SpeechRecognitionLike = {
@@ -1103,6 +1130,75 @@ function categoryLabel(categoryKey: string): string {
   return `${domainLabel(category.domain)}${directionLabel(category.direction)}｜${category.display_name_zh}`
 }
 
+function mapBusinessExpenseCategory(displayName: string): string {
+  const fixedExpenseTypes = new Set(["租金", "水電", "通訊", "人事", "固定其他", "還款"])
+  const variableExpenseTypes = new Set(["原料", "包材", "耗材", "運費", "瓦斯", "變動其他"])
+  if (fixedExpenseTypes.has(displayName)) return "固定支出"
+  if (variableExpenseTypes.has(displayName)) return "變動支出"
+  return "額外支出"
+}
+
+function mapLifeExpenseCategory(displayName: string): string {
+  const mapping: Record<string, string> = {
+    食: "食",
+    衣: "衣",
+    住: "住",
+    行: "行",
+    育: "育",
+    樂: "樂",
+    電信: "電信",
+    醫療: "醫療",
+    "保險(月繳)": "保險",
+    儲蓄: "儲蓄",
+    還款: "還款",
+  }
+  return mapping[displayName] ?? "其他"
+}
+
+function toLegacyAnalysisData(transactions: Transaction[]): { incomes: LegacyIncome[]; expenses: LegacyExpense[] } {
+  const incomes: LegacyIncome[] = []
+  const expenses: LegacyExpense[] = []
+
+  transactions.forEach(item => {
+    if (item.amount <= 0) return
+
+    const category = CATEGORY_BY_KEY.get(item.category_key)
+    const domain: Exclude<Domain, "unknown"> = category?.domain ?? (item.domain === "business" ? "business" : "life")
+    const direction: Exclude<Direction, "unknown"> =
+      category?.direction ?? (item.direction === "income" ? "income" : "expense")
+    const displayName = category?.display_name_zh ?? item.category_key
+
+    if (direction === "income") {
+      incomes.push({
+        date: item.occurred_at,
+        category: domain === "business" ? "生意收入" : "生活收入",
+        type: displayName,
+        description: item.note,
+        unitPrice: item.amount,
+        quantity: 1,
+        paymentStatus: "已收款",
+        subtotal: item.amount,
+        customerNote: item.user_overridden ? "已人工修正" : undefined,
+      })
+      return
+    }
+
+    expenses.push({
+      date: item.occurred_at,
+      category: domain === "business" ? "生意支出" : "生活支出",
+      expenseCategory:
+        domain === "business" ? mapBusinessExpenseCategory(displayName) : mapLifeExpenseCategory(displayName),
+      type: displayName,
+      description: item.note,
+      unitPrice: item.amount,
+      quantity: 1,
+      subtotal: item.amount,
+    })
+  })
+
+  return { incomes, expenses }
+}
+
 function toTransaction(item: DraftTransaction): Transaction {
   return {
     id: item.id,
@@ -1361,6 +1457,7 @@ export default function MvpAccountingPage() {
       return content.includes(keyword)
     })
   }, [sortedTransactions, overviewQuery, overviewDirectionFilter])
+  const analysisData = useMemo(() => toLegacyAnalysisData(sortedTransactions), [sortedTransactions])
 
   function resetQuickInputs() {
     recognitionRef.current?.stop()
@@ -1758,20 +1855,34 @@ export default function MvpAccountingPage() {
         <Card className="border-white/15 bg-slate-900/70">
           <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
             <CardTitle className="text-white text-xl">最近 3 筆紀錄</CardTitle>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="border-white/20 bg-white/5 text-white hover:bg-white/10"
-              onClick={() => {
-                setStep("overview")
-                setOverviewQuery("")
-                setOverviewDirectionFilter("all")
-                cancelEditTransaction()
-              }}
-            >
-              查看全部
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                onClick={() => {
+                  setStep("analysis")
+                  cancelEditTransaction()
+                }}
+              >
+                財務分析
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                onClick={() => {
+                  setStep("overview")
+                  setOverviewQuery("")
+                  setOverviewDirectionFilter("all")
+                  cancelEditTransaction()
+                }}
+              >
+                查看全部
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             {recentTransactions.length === 0 ? (
@@ -2002,6 +2113,48 @@ export default function MvpAccountingPage() {
             )
           })}
         </div>
+      </div>
+    )
+  }
+
+  function renderAnalysis() {
+    const totalCount = analysisData.incomes.length + analysisData.expenses.length
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <Button
+            variant="outline"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+            onClick={() => setStep("home")}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            回到主頁
+          </Button>
+          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10">
+            分析資料：{totalCount} 筆
+          </Badge>
+        </div>
+
+        <Card className="border-white/20 bg-slate-900/70">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-white text-xl">財務分析與現金流評估</CardTitle>
+            <CardDescription className="text-slate-300">沿用舊版分析與財務月報，依目前紀錄即時更新。</CardDescription>
+          </CardHeader>
+        </Card>
+
+        {totalCount === 0 ? (
+          <Card className="border-white/15 bg-slate-900/70">
+            <CardContent className="pt-6">
+              <p className="text-slate-300 text-sm">目前沒有可分析資料，請先新增收入或支出紀錄。</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <CashFlowAnalysis incomes={analysisData.incomes} expenses={analysisData.expenses} />
+            <FinancialReport incomes={analysisData.incomes} expenses={analysisData.expenses} />
+          </>
+        )}
       </div>
     )
   }
@@ -2544,6 +2697,7 @@ export default function MvpAccountingPage() {
 
         {step === "home" && renderHome()}
         {step === "overview" && renderOverview()}
+        {step === "analysis" && renderAnalysis()}
         {step === "quick-add" && renderQuickAdd()}
         {step === "confirm" && renderConfirm()}
       </main>
