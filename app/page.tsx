@@ -1893,66 +1893,68 @@ export default function MvpAccountingPage() {
     return (
       <div className="space-y-4">
         <Card className="border-indigo-400/30 bg-slate-900/70">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="text-white text-xl">本月統計總覽</CardTitle>
-                <CardDescription className="text-slate-300">一眼掌握當月收入、支出與現金流</CardDescription>
-              </div>
-              <Badge variant="outline" className="w-fit border-indigo-400/40 bg-indigo-500/10 text-indigo-200">
-                {formatMonthLabel(selectedMonth)}
-              </Badge>
-            </div>
+          <CardHeader className="pb-2 sm:pb-3">
+            <CardTitle className="text-white text-lg sm:text-xl">每月統計總覽</CardTitle>
+            <CardDescription className="text-slate-300 text-xs sm:text-sm">一眼掌握當月收入、支出與現金流</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex items-center justify-between gap-2">
               <Button
                 type="button"
                 variant="outline"
-                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] min-w-[44px] shrink-0"
                 onClick={() => setSelectedMonth(previous => shiftMonthKey(previous, -1))}
+                aria-label="上個月"
               >
-                上月
+                <ArrowLeft className="h-4 w-4" />
               </Button>
-              <Input
-                type="month"
-                value={selectedMonth}
-                onChange={event => {
-                  const nextMonth = event.target.value
-                  if (/^\d{4}-\d{2}$/.test(nextMonth)) {
-                    setSelectedMonth(nextMonth)
-                  }
-                }}
-                className="bg-slate-950/60 text-white border-white/20 text-center"
-              />
+
+              <label className="relative flex-1 flex items-center justify-center min-h-[44px] rounded-md border border-white/20 bg-slate-950/60 cursor-pointer hover:bg-slate-950/40 transition-colors">
+                <span className="text-sm sm:text-base font-medium text-white pointer-events-none select-none">
+                  {formatMonthLabel(selectedMonth)}
+                </span>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={event => {
+                    const nextMonth = event.target.value
+                    if (/^\d{4}-\d{2}$/.test(nextMonth)) {
+                      setSelectedMonth(nextMonth)
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </label>
+
               <Button
                 type="button"
                 variant="outline"
-                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] min-w-[44px] shrink-0"
                 onClick={() => setSelectedMonth(previous => shiftMonthKey(previous, 1))}
+                aria-label="下個月"
               >
-                下月
+                <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3">
-                <p className="text-xs text-emerald-100/90">當月收入</p>
-                <p className="text-lg font-semibold text-emerald-200">{formatMoney(monthIncome)}</p>
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
+              <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2.5 sm:p-3">
+                <p className="text-[11px] sm:text-xs text-emerald-100/90">當月收入</p>
+                <p className="text-base sm:text-lg font-semibold text-emerald-200 truncate">{formatMoney(monthIncome)}</p>
               </div>
-              <div className="rounded-lg border border-rose-300/20 bg-rose-500/10 p-3">
-                <p className="text-xs text-rose-100/90">當月支出</p>
-                <p className="text-lg font-semibold text-rose-200">{formatMoney(monthExpense)}</p>
+              <div className="rounded-lg border border-rose-300/20 bg-rose-500/10 p-2.5 sm:p-3">
+                <p className="text-[11px] sm:text-xs text-rose-100/90">當月支出</p>
+                <p className="text-base sm:text-lg font-semibold text-rose-200 truncate">{formatMoney(monthExpense)}</p>
               </div>
-              <div className="rounded-lg border border-white/15 bg-white/5 p-3">
-                <p className="text-xs text-slate-300">淨收支</p>
-                <p className={`text-lg font-semibold ${monthNet >= 0 ? "text-emerald-200" : "text-rose-300"}`}>
+              <div className="rounded-lg border border-white/15 bg-white/5 p-2.5 sm:p-3">
+                <p className="text-[11px] sm:text-xs text-slate-300">淨收支</p>
+                <p className={`text-base sm:text-lg font-semibold truncate ${monthNet >= 0 ? "text-emerald-200" : "text-rose-300"}`}>
                   {formatMoney(monthNet)}
                 </p>
               </div>
-              <div className="rounded-lg border border-white/15 bg-white/5 p-3">
-                <p className="text-xs text-slate-300">記帳筆數</p>
-                <p className="text-lg font-semibold text-white">{monthTxCount} 筆</p>
+              <div className="rounded-lg border border-white/15 bg-white/5 p-2.5 sm:p-3">
+                <p className="text-[11px] sm:text-xs text-slate-300">記帳筆數</p>
+                <p className="text-base sm:text-lg font-semibold text-white">{monthTxCount} 筆</p>
               </div>
             </div>
 
@@ -1991,9 +1993,9 @@ export default function MvpAccountingPage() {
               />
             </div>
 
-            <div className="rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-fuchsia-500/20 via-purple-500/10 to-indigo-500/20 p-4">
-              <p className="text-xs text-fuchsia-100/90">離夢想目標還差</p>
-              <p className="mt-1 text-3xl font-bold tracking-wide text-white">{formatMoney(dreamPlan.targetLeft)}</p>
+            <div className="rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-fuchsia-500/20 via-purple-500/10 to-indigo-500/20 p-3 sm:p-4">
+              <p className="text-[11px] sm:text-xs text-fuchsia-100/90">離夢想目標還差</p>
+              <p className="mt-1 text-2xl sm:text-3xl font-bold tracking-wide text-white truncate">{formatMoney(dreamPlan.targetLeft)}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="border-white/25 bg-white/10 text-white">
                   已存 {formatMoney(dreamSaved)}
@@ -2047,35 +2049,37 @@ export default function MvpAccountingPage() {
         </Card>
 
         <Card className="border-white/15 bg-slate-900/70">
-          <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-white text-xl">{formatMonthLabel(selectedMonth)} 最近 3 筆</CardTitle>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
-                onClick={() => {
-                  setStep("analysis")
-                  cancelEditTransaction()
-                }}
-              >
-                財務分析
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
-                onClick={() => {
-                  setStep("overview")
-                  setOverviewQuery("")
-                  setOverviewDirectionFilter("all")
-                  cancelEditTransaction()
-                }}
-              >
-                查看全部
-              </Button>
+          <CardHeader className="pb-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle className="text-white text-lg sm:text-xl">{formatMonthLabel(selectedMonth)} 最近 3 筆</CardTitle>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 text-xs sm:text-sm min-h-[36px]"
+                  onClick={() => {
+                    setStep("analysis")
+                    cancelEditTransaction()
+                  }}
+                >
+                  財務分析
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 text-xs sm:text-sm min-h-[36px]"
+                  onClick={() => {
+                    setStep("overview")
+                    setOverviewQuery("")
+                    setOverviewDirectionFilter("all")
+                    cancelEditTransaction()
+                  }}
+                >
+                  查看全部
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -2109,39 +2113,39 @@ export default function MvpAccountingPage() {
 
   function renderOverview() {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex items-center justify-between gap-2">
           <Button
             variant="outline"
-            className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
             onClick={() => {
               setStep("home")
               cancelEditTransaction()
             }}
           >
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
             回到主頁
           </Button>
-          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10">
-            全部紀錄：{transactions.length} 筆
+          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10 text-xs shrink-0">
+            共 {transactions.length} 筆
           </Badge>
         </div>
 
         <Card className="border-white/20 bg-slate-900/70">
           <CardHeader className="pb-3">
-            <CardTitle className="text-white text-lg">交易總覽與編輯</CardTitle>
-            <CardDescription className="text-slate-300">可搜尋、編輯與刪除既有交易</CardDescription>
+            <CardTitle className="text-white text-base sm:text-lg">交易總覽與編輯</CardTitle>
+            <CardDescription className="text-slate-300 text-xs sm:text-sm">可搜尋、編輯與刪除既有交易</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
               <Button
                 type="button"
                 variant={overviewDirectionFilter === "all" ? "default" : "outline"}
-                className={
+                className={`min-h-[40px] text-xs sm:text-sm ${
                   overviewDirectionFilter === "all"
                     ? "bg-indigo-500 text-white hover:bg-indigo-400"
                     : "border-white/20 bg-white/5 text-white hover:bg-white/10"
-                }
+                }`}
                 onClick={() => setOverviewDirectionFilter("all")}
               >
                 全部（{overviewFilterStats.all}）
@@ -2149,11 +2153,11 @@ export default function MvpAccountingPage() {
               <Button
                 type="button"
                 variant={overviewDirectionFilter === "income" ? "default" : "outline"}
-                className={
+                className={`min-h-[40px] text-xs sm:text-sm ${
                   overviewDirectionFilter === "income"
                     ? "bg-emerald-500 text-slate-950 hover:bg-emerald-400"
                     : "border-white/20 bg-white/5 text-white hover:bg-white/10"
-                }
+                }`}
                 onClick={() => setOverviewDirectionFilter("income")}
               >
                 收入（{overviewFilterStats.income}）
@@ -2161,11 +2165,11 @@ export default function MvpAccountingPage() {
               <Button
                 type="button"
                 variant={overviewDirectionFilter === "expense" ? "default" : "outline"}
-                className={
+                className={`min-h-[40px] text-xs sm:text-sm ${
                   overviewDirectionFilter === "expense"
                     ? "bg-rose-500 text-white hover:bg-rose-400"
                     : "border-white/20 bg-white/5 text-white hover:bg-white/10"
-                }
+                }`}
                 onClick={() => setOverviewDirectionFilter("expense")}
               >
                 支出（{overviewFilterStats.expense}）
@@ -2174,7 +2178,7 @@ export default function MvpAccountingPage() {
             <Input
               value={overviewQuery}
               onChange={event => setOverviewQuery(event.target.value)}
-              className="bg-slate-950/60 border-white/20 text-white"
+              className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
               placeholder="搜尋關鍵字（日期、備註、類別）"
             />
             <p className="text-xs text-slate-400">目前顯示 {overviewTransactions.length} 筆</p>
@@ -2197,18 +2201,18 @@ export default function MvpAccountingPage() {
                 <CardContent className="pt-6 space-y-3">
                   {!isEditing ? (
                     <>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm text-white break-words">{item.note}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2">
-                            <Badge variant="outline" className="text-[11px] border-white/20 text-slate-200">
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
                               {categoryLabel(item.category_key)}
                             </Badge>
-                            <span className="text-[11px] text-slate-400">{item.occurred_at}</span>
-                            <span className="text-[11px] text-slate-400">{modeLabel(item.input_mode)}</span>
+                            <span className="text-[10px] sm:text-[11px] text-slate-400">{item.occurred_at}</span>
+                            <span className="text-[10px] sm:text-[11px] text-slate-400">{modeLabel(item.input_mode)}</span>
                           </div>
                         </div>
-                        <p className={`text-sm font-semibold ${item.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
+                        <p className={`text-sm font-semibold shrink-0 ${item.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
                           {item.direction === "expense" ? "-" : "+"}
                           {formatMoney(item.amount)}
                         </p>
@@ -2218,7 +2222,7 @@ export default function MvpAccountingPage() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                          className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px]"
                           onClick={() => startEditTransaction(item)}
                         >
                           編輯
@@ -2226,7 +2230,7 @@ export default function MvpAccountingPage() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="border-rose-300/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+                          className="border-rose-300/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20 min-h-[40px]"
                           onClick={() => removeTransaction(item.id)}
                         >
                           刪除
@@ -2238,7 +2242,7 @@ export default function MvpAccountingPage() {
                       <Textarea
                         value={editDraft.note}
                         onChange={event => setEditDraft(previous => (previous ? { ...previous, note: event.target.value } : previous))}
-                        className="min-h-[90px] bg-slate-950/60 border-white/20 text-white"
+                        className="min-h-[80px] sm:min-h-[90px] bg-slate-950/60 border-white/20 text-white text-sm"
                       />
 
                       <div className="grid grid-cols-2 gap-2">
@@ -2249,7 +2253,8 @@ export default function MvpAccountingPage() {
                           onChange={event =>
                             setEditDraft(previous => (previous ? { ...previous, amount: event.target.value } : previous))
                           }
-                          className="bg-slate-950/60 border-white/20 text-white"
+                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+                          placeholder="金額"
                         />
                         <Input
                           type="date"
@@ -2257,7 +2262,7 @@ export default function MvpAccountingPage() {
                           onChange={event =>
                             setEditDraft(previous => (previous ? { ...previous, occurred_at: event.target.value } : previous))
                           }
-                          className="bg-slate-950/60 border-white/20 text-white"
+                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
                         />
                       </div>
 
@@ -2266,7 +2271,7 @@ export default function MvpAccountingPage() {
                         onChange={event =>
                           setEditDraft(previous => (previous ? { ...previous, category_key: event.target.value } : previous))
                         }
-                        className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
+                        className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2.5 text-sm text-white min-h-[44px]"
                       >
                         {TAXONOMY.map(category => (
                           <option key={category.category_key} value={category.category_key}>
@@ -2275,10 +2280,10 @@ export default function MvpAccountingPage() {
                         ))}
                       </select>
 
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         <Button
                           type="button"
-                          className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+                          className="bg-emerald-500 text-slate-950 hover:bg-emerald-400 min-h-[40px] text-sm"
                           onClick={saveEditedTransaction}
                         >
                           儲存
@@ -2286,7 +2291,7 @@ export default function MvpAccountingPage() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                          className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
                           onClick={cancelEditTransaction}
                         >
                           取消
@@ -2294,7 +2299,7 @@ export default function MvpAccountingPage() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="border-rose-300/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+                          className="border-rose-300/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20 min-h-[40px] text-sm"
                           onClick={() => removeTransaction(item.id)}
                         >
                           刪除
@@ -2315,25 +2320,25 @@ export default function MvpAccountingPage() {
     const totalCount = analysisData.incomes.length + analysisData.expenses.length
 
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex items-center justify-between gap-2">
           <Button
             variant="outline"
-            className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
             onClick={() => setStep("home")}
           >
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
             回到主頁
           </Button>
-          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10">
-            分析資料：{totalCount} 筆
+          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10 text-xs shrink-0">
+            分析 {totalCount} 筆
           </Badge>
         </div>
 
         <Card className="border-white/20 bg-slate-900/70">
           <CardHeader className="pb-3">
-            <CardTitle className="text-white text-xl">財務分析與現金流評估</CardTitle>
-            <CardDescription className="text-slate-300">沿用舊版分析與財務月報，依目前紀錄即時更新。</CardDescription>
+            <CardTitle className="text-white text-lg sm:text-xl">財務分析與現金流評估</CardTitle>
+            <CardDescription className="text-slate-300 text-xs sm:text-sm">沿用舊版分析與財務月報，依目前紀錄即時更新。</CardDescription>
           </CardHeader>
         </Card>
 
@@ -2356,28 +2361,28 @@ export default function MvpAccountingPage() {
   function renderQuickAdd() {
     const activeMeta = MODE_OPTIONS.find(option => option.mode === activeMode)
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex items-center justify-between gap-2">
           <Button
             variant="outline"
-            className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
             onClick={() => {
               setStep("home")
               setBanner(null)
             }}
           >
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
             回到主頁
           </Button>
-          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10">
+          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10 text-xs shrink-0">
             {activeMeta?.title}
           </Badge>
         </div>
 
         <Card className="border-white/20 bg-slate-900/70">
           <CardHeader>
-            <CardTitle className="text-white">{activeMeta?.title}</CardTitle>
-            <CardDescription className="text-slate-300">{activeMeta?.description}</CardDescription>
+            <CardTitle className="text-white text-base sm:text-lg">{activeMeta?.title}</CardTitle>
+            <CardDescription className="text-slate-300 text-xs sm:text-sm">{activeMeta?.description}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {activeMode === "text_single" && (
@@ -2385,28 +2390,28 @@ export default function MvpAccountingPage() {
                 <Textarea
                   value={singleText}
                   onChange={event => setSingleText(event.target.value)}
-                  className="min-h-[180px] bg-slate-950/60 border-white/20 text-white placeholder:text-slate-400"
-                  placeholder="可輸入單筆或貼上整段流水帳；系統會自動判斷並批次拆行。例：早餐 65、咖啡 80、捷運 30；3/5 計程車 230"
+                  className="min-h-[140px] sm:min-h-[180px] bg-slate-950/60 border-white/20 text-white placeholder:text-slate-400 text-sm sm:text-base"
+                  placeholder="可輸入單筆或貼上整段流水帳；系統會自動判斷並批次拆行。例：早餐 65、咖啡 80、捷運 30"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     type="button"
                     variant={isListening ? "default" : "outline"}
-                    className={
+                    className={`min-h-[44px] text-sm ${
                       isListening
                         ? "bg-rose-500 text-white hover:bg-rose-400"
                         : "border-white/20 bg-white/5 text-white hover:bg-white/10"
-                    }
+                    }`}
                     disabled={!isSpeechSupported}
                     onClick={toggleSpeechInput}
                   >
-                    <Mic className="mr-2 h-4 w-4" />
-                    {isListening ? "停止語音輸入" : "開始語音輸入"}
+                    <Mic className="mr-1.5 h-4 w-4 shrink-0" />
+                    <span className="truncate">{isListening ? "停止語音" : "語音輸入"}</span>
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
-                    className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                    className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] text-sm"
                     onClick={() => {
                       setSingleText("")
                       setSpeechPreview("")
@@ -2439,11 +2444,11 @@ export default function MvpAccountingPage() {
             {activeMode === "file_import" && (
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <p className="text-sm text-slate-200">支援上傳：照片、試算表、文件、可攜式文件</p>
+                  <p className="text-xs sm:text-sm text-slate-200">支援上傳：照片、試算表、文件、可攜式文件</p>
                   <Input
                     type="file"
                     accept="image/*,.xlsx,.csv,.docx,.pdf"
-                    className="bg-slate-950/60 border-white/20 text-slate-200 file:text-slate-200"
+                    className="bg-slate-950/60 border-white/20 text-slate-200 file:text-slate-200 min-h-[44px]"
                     onChange={event => void handleFilePicked(event.target.files?.[0] ?? null)}
                   />
                   {isFileParsing && uploadKind === "document" && <p className="text-xs text-indigo-200">檔案解析中...</p>}
@@ -2492,7 +2497,7 @@ export default function MvpAccountingPage() {
 
                     {showMappingSettings && (
                       <>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <label className="text-xs text-slate-300">
                             日期欄位（可選）
                             <select
@@ -2624,7 +2629,7 @@ export default function MvpAccountingPage() {
 
             <Button
               onClick={handleParseInput}
-              className="w-full bg-indigo-500 text-white hover:bg-indigo-400"
+              className="w-full bg-indigo-500 text-white hover:bg-indigo-400 min-h-[48px] text-base"
               disabled={
                 (activeMode === "file_import" && (isFileParsing || !uploadedFile)) ||
                 (activeMode === "text_single" && !singleText.trim())
@@ -2646,21 +2651,21 @@ export default function MvpAccountingPage() {
       (activeMode === "file_import" && uploadKind === "image")
 
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex items-center justify-between gap-2">
           <Button
             variant="outline"
-            className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
             onClick={() => {
               setStep("quick-add")
               setBanner(null)
             }}
           >
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
             返回輸入
           </Button>
-          <Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/10 text-emerald-200">
-            待儲存：{selectedCount} 筆
+          <Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/10 text-emerald-200 text-xs shrink-0">
+            待儲存 {selectedCount} 筆
           </Badge>
         </div>
 
@@ -2743,15 +2748,15 @@ export default function MvpAccountingPage() {
                   lowConfidence ? "border-amber-300/40" : "border-white/15"
                 }`}
               >
-                <CardContent className="pt-6 space-y-3">
+                <CardContent className="pt-4 sm:pt-6 space-y-3">
                   <div className="flex items-start gap-2">
                     <input
                       type="checkbox"
-                      className="mt-1 h-4 w-4 rounded border-white/20 bg-slate-950"
+                      className="mt-1.5 h-5 w-5 shrink-0 rounded border-white/20 bg-slate-950 accent-indigo-500"
                       checked={draft.selected}
                       onChange={event => updateDraft(index, item => ({ ...item, selected: event.target.checked }))}
                     />
-                    <div className="flex-1 space-y-1">
+                    <div className="flex-1 min-w-0 space-y-2">
                       <Textarea
                         value={draft.note}
                         onChange={event =>
@@ -2761,7 +2766,7 @@ export default function MvpAccountingPage() {
                             user_overridden: event.target.value.trim() !== item.raw_line.trim(),
                           }))
                         }
-                        className="min-h-[80px] bg-slate-950/60 border-white/20 text-white"
+                        className="min-h-[70px] sm:min-h-[80px] bg-slate-950/60 border-white/20 text-white text-sm"
                       />
                       <div className="grid grid-cols-2 gap-2">
                         <Input
@@ -2776,13 +2781,14 @@ export default function MvpAccountingPage() {
                               user_overridden: true,
                             }))
                           }
-                          className="bg-slate-950/60 border-white/20 text-white"
+                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
+                          placeholder="金額"
                         />
                         <Input
                           type="date"
                           value={draft.occurred_at}
                           onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
-                          className="bg-slate-950/60 border-white/20 text-white"
+                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
                         />
                       </div>
                       <select
@@ -2799,7 +2805,7 @@ export default function MvpAccountingPage() {
                             user_overridden: item.ai_predicted_category_key !== key,
                           }))
                         }}
-                        className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2 text-sm text-white"
+                        className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2.5 text-sm text-white min-h-[44px]"
                       >
                         {TAXONOMY.map(category => (
                           <option key={category.category_key} value={category.category_key}>
@@ -2812,28 +2818,28 @@ export default function MvpAccountingPage() {
                       type="button"
                       size="icon"
                       variant="ghost"
-                      className="text-slate-300 hover:text-white hover:bg-white/10"
+                      className="text-slate-300 hover:text-white hover:bg-white/10 shrink-0 h-9 w-9"
                       onClick={() => setDrafts(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className={`text-[11px] ${confidenceTone(draft.ai_confidence)}`}>
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <Badge variant="outline" className={`text-[10px] sm:text-[11px] ${confidenceTone(draft.ai_confidence)}`}>
                       可信度 {Math.round(draft.ai_confidence * 100)}%
                     </Badge>
-                    <Badge variant="outline" className="text-[11px] border-white/20 text-slate-200">
+                    <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
                       {domainLabel(draft.domain)}／{directionLabel(draft.direction)}
                     </Badge>
-                    <Badge variant="outline" className="text-[11px] border-white/20 text-slate-200">
+                    <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
                       {modeLabel(draft.input_mode)}
                     </Badge>
                   </div>
 
                   {lowConfidence && (
-                    <div className="rounded-md border border-amber-300/30 bg-amber-500/10 p-2 text-xs text-amber-100 flex items-center gap-2">
-                      <CircleAlert className="h-4 w-4" />
+                    <div className="rounded-md border border-amber-300/30 bg-amber-500/10 p-2 text-xs text-amber-100 flex items-start gap-2">
+                      <CircleAlert className="h-4 w-4 shrink-0 mt-0.5" />
                       低置信度，建議你點一下類別後再儲存（但不會阻擋儲存）。
                     </div>
                   )}
@@ -2851,7 +2857,7 @@ export default function MvpAccountingPage() {
 
         <Button
           onClick={saveDrafts}
-          className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+          className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 min-h-[48px] text-base"
           disabled={drafts.length === 0}
         >
           <Save className="mr-2 h-4 w-4" />
@@ -2862,8 +2868,8 @@ export default function MvpAccountingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white">
-      <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between backdrop-blur-sm bg-white/5">
+    <div className="min-h-[100dvh] bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white">
+      <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between backdrop-blur-sm bg-white/5 sticky top-0 z-30 safe-top">
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="border-indigo-300/40 bg-indigo-500/10 text-indigo-200">
             新版試用
@@ -2882,7 +2888,7 @@ export default function MvpAccountingPage() {
         </Link>
       </div>
 
-      <main className="mx-auto w-full max-w-2xl px-4 py-5 pb-28">
+      <main className="mx-auto w-full max-w-2xl px-3 sm:px-4 py-4 pb-32">
         {banner && (
           <div className="mb-4 rounded-md border border-indigo-300/30 bg-indigo-500/10 px-3 py-2 text-sm text-indigo-100">
             {banner}
@@ -2897,10 +2903,10 @@ export default function MvpAccountingPage() {
       </main>
 
       {step === "home" && (
-        <div className="fixed bottom-6 left-0 right-0 flex justify-center px-4">
+        <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pb-6 safe-bottom">
           <Button
             size="lg"
-            className="h-14 w-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-900/50"
+            className="h-14 w-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-900/50 active:scale-95 transition-transform"
             onClick={() => {
               setModeSheetOpen(true)
               setBanner(null)
@@ -2913,14 +2919,14 @@ export default function MvpAccountingPage() {
       )}
 
       <Sheet open={modeSheetOpen} onOpenChange={setModeSheetOpen}>
-        <SheetContent side="bottom" className="bg-slate-950 text-white border-white/10 max-h-[80vh] overflow-y-auto">
+        <SheetContent side="bottom" className="bg-slate-950 text-white border-white/10 max-h-[75dvh] overflow-y-auto rounded-t-2xl safe-bottom">
           <SheetHeader>
-            <SheetTitle className="text-white">選擇輸入方式</SheetTitle>
-            <SheetDescription className="text-slate-300">
+            <SheetTitle className="text-white text-base sm:text-lg">選擇輸入方式</SheetTitle>
+            <SheetDescription className="text-slate-300 text-xs sm:text-sm">
               所有輸入都會轉成同一種記帳資料，先分類再一鍵修正。
             </SheetDescription>
           </SheetHeader>
-          <div className="mt-4 space-y-2">
+          <div className="mt-3 sm:mt-4 space-y-2">
             {MODE_OPTIONS.map(option => {
               const Icon = option.icon
               return (
@@ -2928,17 +2934,17 @@ export default function MvpAccountingPage() {
                   key={option.mode}
                   type="button"
                   onClick={() => openMode(option.mode)}
-                  className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-3 text-left hover:bg-white/10 transition-colors"
+                  className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-3.5 text-left hover:bg-white/10 active:bg-white/15 transition-colors"
                 >
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1 rounded-md bg-indigo-500/20 p-1.5">
-                      <Icon className="h-4 w-4 text-indigo-200" />
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-md bg-indigo-500/20 p-2 shrink-0">
+                      <Icon className="h-5 w-5 text-indigo-200" />
                     </span>
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-white">{option.title}</p>
                       <p className="text-xs text-slate-300 mt-0.5">{option.description}</p>
                     </div>
-                    <Check className="ml-auto h-4 w-4 text-slate-500" />
+                    <ArrowRight className="h-4 w-4 text-slate-500 shrink-0" />
                   </div>
                 </button>
               )

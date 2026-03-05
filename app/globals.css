@@ -6,6 +6,12 @@
   .text-balance {
     text-wrap: balance;
   }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 @layer base {
@@ -86,6 +92,15 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
   }
 }
 
