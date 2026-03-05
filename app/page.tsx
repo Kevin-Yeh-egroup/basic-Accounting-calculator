@@ -838,19 +838,6 @@ function getFileExt(filename: string): string {
   return parts[parts.length - 1].toLowerCase()
 }
 
-const ALLOWED_IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif"])
-const ALLOWED_DOC_EXTS = new Set(["xlsx", "xls", "csv", "pdf", "doc", "docx", "ppt", "pptx"])
-
-function isImageUploadFile(file: File): boolean {
-  const ext = getFileExt(file.name)
-  return file.type.startsWith("image/") || ALLOWED_IMAGE_EXTS.has(ext)
-}
-
-function isAllowedUploadFile(file: File): boolean {
-  const ext = getFileExt(file.name)
-  return ALLOWED_IMAGE_EXTS.has(ext) || ALLOWED_DOC_EXTS.has(ext) || file.type.startsWith("image/")
-}
-
 function toColumnLabel(columnKey: string): string {
   if (columnKey === "none") return "不使用"
   return `欄位 ${columnKey.replace("col_", "")}`
@@ -2084,6 +2071,15 @@ export default function MvpAccountingPage() {
     resetQuickInputs()
   }
 
+  function buildMockFileDrafts(files: File[]): DraftTransaction[] {
+    if (files.length === 0) return []
+    const generatedCount = Math.min(Math.max(files.length * 4, 4), 40)
+    return generateRandomDrafts(generatedCount).map((draft, index) => ({
+      ...draft,
+      source_file_id: files[index % files.length]?.name ?? "",
+    }))
+  }
+
   function handleFilesPicked(files: File[]) {
     setUploadedFiles(files)
     setUploadedFile(files[0] ?? null)
@@ -2099,26 +2095,11 @@ export default function MvpAccountingPage() {
       return
     }
 
-    const unsupportedFiles = files.filter(file => !isAllowedUploadFile(file))
-    if (unsupportedFiles.length > 0) {
-      const extList = [...new Set(unsupportedFiles.map(file => getFileExt(file.name).toUpperCase()))].join("、")
-      setUploadedFiles([])
-      setUploadedFile(null)
-      setUploadKind("none")
-      setDrafts([])
-      setBanner(`不支援此檔案格式（${extList}），請上傳圖片、Excel、PDF、Word 或 PPT。`)
-      return
-    }
-
     setBanner(null)
     setUploadKind("document")
     setIsFileParsing(true)
 
-    const generatedCount = Math.min(Math.max(files.length * 4, 4), 40)
-    const generatedDrafts = generateRandomDrafts(generatedCount).map((draft, index) => ({
-      ...draft,
-      source_file_id: files[index % files.length]?.name ?? "",
-    }))
+    const generatedDrafts = buildMockFileDrafts(files)
 
     setDrafts(generatedDrafts)
     setImportJob({
@@ -2162,11 +2143,6 @@ export default function MvpAccountingPage() {
   function buildBulkDrafts(sourceText: string): DraftTransaction[] {
     const normalizedLines = normalizeBulkLines(sourceText)
     return normalizedLines.map(line => buildDraftTransaction(line, "bulk_text"))
-  }
-
-  function buildFileDrafts(): DraftTransaction[] {
-    if (!uploadedFile || fileMapping.amount_column === "none") return []
-    return buildDraftsFromMappedRows(previewRows, fileMapping, uploadedFile.name, "file_import")
   }
 
   function generateRandomDrafts(count: number): DraftTransaction[] {
@@ -2252,28 +2228,33 @@ export default function MvpAccountingPage() {
         setImportJob(null)
       }
     } else if (parseMode === "file_import") {
-      if (uploadKind === "image") {
-        parsed = buildPhotoDraft()
+      let sourceFiles: File[] = []
+      if (uploadedFiles.length > 0) {
+        sourceFiles = uploadedFiles
+      } else if (uploadedFile) {
+        sourceFiles = [uploadedFile]
+      }
+      parsed = buildMockFileDrafts(sourceFiles)
+      if (sourceFiles.length > 0) {
+        setImportJob({
+          job_id: uid("job"),
+          user_id: DEMO_USER_ID,
+          input_mode: "file_import",
+          status: "ready_to_import",
+          errors: [],
+          stats: {
+            total_lines: parsed.length,
+            success_lines: parsed.length,
+            needs_manual_lines: 0,
+          },
+        })
+      } else {
         setImportJob(null)
-      } else if (uploadKind === "document") {
-        parsed = buildFileDrafts()
-        if (importJob) {
-          setImportJob({
-            ...importJob,
-            status: "ready_to_import",
-            errors: parsed.filter(item => item.parse_error).map(item => `${item.raw_line}：${item.parse_error}`),
-            stats: {
-              total_lines: parsed.length,
-              success_lines: parsed.filter(item => !item.parse_error).length,
-              needs_manual_lines: parsed.filter(item => Boolean(item.parse_error)).length,
-            },
-          })
-        }
       }
     }
 
     if (parsed.length === 0) {
-      setBanner("目前沒有可解析的資料，請先補上文字或金額。")
+      setBanner("尚未產生可確認資料，請先輸入內容或上傳檔案。")
       return
     }
 
@@ -2283,6 +2264,14 @@ export default function MvpAccountingPage() {
 
   function updateDraft(index: number, updater: (draft: DraftTransaction) => DraftTransaction) {
     setDrafts(prev => prev.map((item, itemIndex) => (itemIndex === index ? updater(item) : item)))
+  }
+
+  function shiftDraftDate(index: number, days: number) {
+    updateDraft(index, item => {
+      const fallbackDate = new Date().toISOString().slice(0, 10)
+      const baseDate = item.occurred_at || fallbackDate
+      return { ...item, occurred_at: shiftDateByDays(baseDate, days) }
+    })
   }
 
   function saveDrafts() {
@@ -3708,16 +3697,15 @@ export default function MvpAccountingPage() {
 
         {entryAdvancedMode === "file" && (
           <div className="flex-1 space-y-3">
-            <p className="text-xs text-slate-300">支援圖片、Excel、PDF、Word、PPT，系統會自動判斷收入/支出與類別。</p>
+            <p className="text-xs text-slate-300">測試模式：可上傳任意檔案，解析後會產生測試內容供確認。</p>
             <Input
               type="file"
-              accept="image/*,.xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx"
               className="bg-slate-950/60 border-white/20 text-slate-200 file:text-slate-200 min-h-[44px]"
-              onChange={event => void handleFilePicked(event.target.files?.[0] ?? null)}
+              onChange={event => handleFilePicked(event.target.files?.[0] ?? null)}
             />
             {uploadedFile && (
               <p className="text-xs text-slate-400">
-                已上傳：{uploadedFile.name}（{uploadKind === "image" ? "照片" : "檔案"}）
+                已上傳：{uploadedFile.name}（測試檔案）
               </p>
             )}
             {uploadKind === "image" && uploadedFile && (
@@ -3850,11 +3838,10 @@ export default function MvpAccountingPage() {
             {activeMode === "file_import" && (
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <p className="text-xs sm:text-sm text-slate-200">支援上傳：圖片、Excel、PDF、Word、PPT</p>
+                  <p className="text-xs sm:text-sm text-slate-200">測試模式：支援上傳任意檔案</p>
                   <Input
                     type="file"
                     multiple
-                    accept="image/*,.xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx"
                     className="bg-slate-950/60 border-white/20 text-slate-200 file:text-slate-200 min-h-[44px]"
                     onChange={event => handleFilesPicked(Array.from(event.target.files ?? []))}
                   />
@@ -3899,7 +3886,7 @@ export default function MvpAccountingPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => setDrafts(generateRandomDrafts(Math.min(Math.max(uploadedFiles.length * 4, 4), 40)))}
+                        onClick={() => setDrafts(buildMockFileDrafts(uploadedFiles))}
                         className="text-[11px] text-indigo-300 hover:text-indigo-100 transition-colors flex items-center gap-1"
                       >
                         <Sparkles className="h-3 w-3" />
@@ -3954,15 +3941,37 @@ export default function MvpAccountingPage() {
                                 </div>
                                 <div className="space-y-0.5">
                                   <p className="text-[9px] text-slate-500">日期 <span className="text-rose-400">*</span></p>
-                                  <Input
-                                    type="date"
-                                    data-draft-date={index}
-                                    value={draft.occurred_at}
-                                    onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
-                                    className={`bg-slate-950/50 text-white text-xs h-8 px-1.5 [color-scheme:dark] ${
-                                      !draft.occurred_at ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/10"
-                                    }`}
-                                  />
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                                      onClick={() => shiftDraftDate(index, -1)}
+                                      aria-label="日期往前一天"
+                                    >
+                                      <ArrowLeft className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Input
+                                      type="date"
+                                      data-draft-date={index}
+                                      value={draft.occurred_at}
+                                      onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
+                                      className={`flex-1 bg-slate-950/50 text-white text-xs h-8 px-1.5 [color-scheme:dark] ${
+                                        !draft.occurred_at ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/10"
+                                      }`}
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                                      onClick={() => shiftDraftDate(index, 1)}
+                                      aria-label="日期往後一天"
+                                    >
+                                      <ArrowRight className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
                                 </div>
                               </div>
 
@@ -4127,15 +4136,37 @@ export default function MvpAccountingPage() {
                         </div>
                         <div className="space-y-1">
                           <p className="text-[10px] text-slate-500 px-0.5">日期 <span className="text-rose-400">*</span></p>
-                          <Input
-                            type="date"
-                            data-draft-date={index}
-                            value={draft.occurred_at}
-                            onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
-                            className={`w-full bg-slate-950/60 text-white min-h-[44px] [color-scheme:dark] ${
-                              !draft.occurred_at ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/20"
-                            }`}
-                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-11 w-11 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                              onClick={() => shiftDraftDate(index, -1)}
+                              aria-label="日期往前一天"
+                            >
+                              <ArrowLeft className="h-4 w-4" />
+                            </Button>
+                            <Input
+                              type="date"
+                              data-draft-date={index}
+                              value={draft.occurred_at}
+                              onChange={event => updateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
+                              className={`w-full flex-1 bg-slate-950/60 text-white min-h-[44px] [color-scheme:dark] ${
+                                !draft.occurred_at ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/20"
+                              }`}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-11 w-11 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                              onClick={() => shiftDraftDate(index, 1)}
+                              aria-label="日期往後一天"
+                            >
+                              <ArrowRight className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                       <select
