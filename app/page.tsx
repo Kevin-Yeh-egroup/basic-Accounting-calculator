@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Progress } from "@/components/ui/progress"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import CashFlowAnalysis from "./components/cash-flow-analysis"
@@ -707,6 +708,22 @@ function formatMoney(value: number): string {
   return CURRENCY.format(value)
 }
 
+function formatMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split("-")
+  if (!year || !month) return monthKey
+  return `${year} 年 ${Number(month)} 月`
+}
+
+function shiftMonthKey(monthKey: string, offset: number): string {
+  const [yearText, monthText] = monthKey.split("-")
+  const year = Number(yearText)
+  const month = Number(monthText)
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return monthKey
+
+  const date = new Date(year, month - 1 + offset, 1)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
+}
+
 function getFileExt(filename: string): string {
   const parts = filename.split(".")
   if (parts.length < 2) return "unknown"
@@ -1258,6 +1275,7 @@ export default function MvpAccountingPage() {
   const [dreamTarget, setDreamTarget] = useState(200000)
   const [dreamSaved, setDreamSaved] = useState(20000)
   const [dreamDeadline, setDreamDeadline] = useState(defaultDreamDeadline)
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7))
 
   const [banner, setBanner] = useState<string | null>(null)
   const [storageReady, setStorageReady] = useState(false)
@@ -1400,10 +1418,13 @@ export default function MvpAccountingPage() {
     return [...transactions].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
   }, [transactions])
 
-  const currentMonthKey = new Date().toISOString().slice(0, 7)
   const currentMonthTx = useMemo(
-    () => transactions.filter(item => item.occurred_at.startsWith(currentMonthKey)),
-    [transactions, currentMonthKey]
+    () => transactions.filter(item => item.occurred_at.startsWith(selectedMonth)),
+    [transactions, selectedMonth]
+  )
+  const sortedCurrentMonthTransactions = useMemo(
+    () => [...currentMonthTx].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
+    [currentMonthTx]
   )
 
   const monthIncome = useMemo(
@@ -1415,6 +1436,18 @@ export default function MvpAccountingPage() {
     [currentMonthTx]
   )
   const monthNet = monthIncome - monthExpense
+  const monthTxCount = currentMonthTx.length
+  const monthExpenseCount = currentMonthTx.filter(item => item.direction === "expense").length
+  const monthAverageExpense = monthExpenseCount > 0 ? monthExpense / monthExpenseCount : 0
+  const monthSavingRate = monthIncome > 0 ? (monthNet / monthIncome) * 100 : null
+  const monthInsightText = useMemo(() => {
+    if (monthTxCount === 0) {
+      return `${formatMonthLabel(selectedMonth)} 尚未有記帳資料。`
+    }
+
+    const savingRateText = monthSavingRate === null ? "" : `，儲蓄率 ${monthSavingRate.toFixed(1)}%`
+    return `平均每筆支出 ${formatMoney(monthAverageExpense)}${savingRateText}`
+  }, [monthAverageExpense, monthSavingRate, monthTxCount, selectedMonth])
 
   const dreamPlan = useMemo(() => {
     const targetLeft = Math.max(dreamTarget - dreamSaved, 0)
@@ -1427,8 +1460,65 @@ export default function MvpAccountingPage() {
     const gap = shouldSavePerMonth - Math.max(monthNet, 0)
     return { targetLeft, monthsLeft, shouldSavePerMonth, gap }
   }, [dreamDeadline, dreamSaved, dreamTarget, monthNet])
+  const dreamCompletionRate = useMemo(() => {
+    if (dreamPlan.targetLeft === 0) return 100
+    if (dreamTarget <= 0) return 0
+    return Math.min((dreamSaved / dreamTarget) * 100, 100)
+  }, [dreamPlan.targetLeft, dreamSaved, dreamTarget])
+  const monthContribution = Math.max(monthNet, 0)
+  const monthPaceRate = useMemo(() => {
+    if (dreamPlan.targetLeft === 0 || dreamPlan.shouldSavePerMonth <= 0) return 100
+    return Math.min((monthContribution / dreamPlan.shouldSavePerMonth) * 100, 100)
+  }, [dreamPlan.shouldSavePerMonth, dreamPlan.targetLeft, monthContribution])
+  const projectedMonthsToGoal = useMemo(() => {
+    if (dreamPlan.targetLeft === 0) return 0
+    if (monthContribution <= 0) return null
+    return Math.ceil(dreamPlan.targetLeft / monthContribution)
+  }, [dreamPlan.targetLeft, monthContribution])
+  const dreamPaceStatus = useMemo(() => {
+    if (dreamPlan.targetLeft === 0) {
+      return {
+        title: "目標已完成",
+        hint: "恭喜！你已達成目前設定的夢想金額。",
+        textClass: "text-emerald-200",
+        barClass: "[&>div]:bg-emerald-400",
+      }
+    }
 
-  const recentTransactions = sortedTransactions.slice(0, 3)
+    if (dreamPlan.gap <= 0) {
+      const projectedText =
+        projectedMonthsToGoal === null
+          ? "目前節奏穩定，持續記帳就能維持在目標軌道上。"
+          : `照目前節奏，約 ${projectedMonthsToGoal} 個月可達標。`
+      return {
+        title: "進度領先",
+        hint: `${projectedText} 有機會提早完成。`,
+        textClass: "text-emerald-200",
+        barClass: "[&>div]:bg-emerald-400",
+      }
+    }
+
+    if (monthContribution <= 0) {
+      return {
+        title: "需要加速",
+        hint: "本月淨額尚未轉正，先降低可調整支出，會更有感。",
+        textClass: "text-amber-200",
+        barClass: "[&>div]:bg-amber-400",
+      }
+    }
+
+    const projectedText = projectedMonthsToGoal === null ? "" : `照目前節奏，約 ${projectedMonthsToGoal} 個月可達標。`
+    return {
+      title: "略慢於目標",
+      hint: `${projectedText} 每月再多留 ${formatMoney(dreamPlan.gap)}，可回到目標進度。`,
+      textClass: "text-amber-200",
+      barClass: "[&>div]:bg-amber-400",
+    }
+  }, [dreamPlan.gap, dreamPlan.targetLeft, monthContribution, projectedMonthsToGoal])
+  const dreamPaceLabel =
+    dreamPlan.targetLeft === 0 ? "已完成" : `${formatMoney(monthContribution)} / ${formatMoney(dreamPlan.shouldSavePerMonth)}`
+
+  const recentTransactions = sortedCurrentMonthTransactions.slice(0, 3)
   const overviewFilterStats = useMemo(
     () => ({
       all: sortedTransactions.length,
@@ -1802,13 +1892,81 @@ export default function MvpAccountingPage() {
   function renderHome() {
     return (
       <div className="space-y-4">
+        <Card className="border-indigo-400/30 bg-slate-900/70">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle className="text-white text-xl">本月統計總覽</CardTitle>
+                <CardDescription className="text-slate-300">一眼掌握當月收入、支出與現金流</CardDescription>
+              </div>
+              <Badge variant="outline" className="w-fit border-indigo-400/40 bg-indigo-500/10 text-indigo-200">
+                {formatMonthLabel(selectedMonth)}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-3 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                onClick={() => setSelectedMonth(previous => shiftMonthKey(previous, -1))}
+              >
+                上月
+              </Button>
+              <Input
+                type="month"
+                value={selectedMonth}
+                onChange={event => {
+                  const nextMonth = event.target.value
+                  if (/^\d{4}-\d{2}$/.test(nextMonth)) {
+                    setSelectedMonth(nextMonth)
+                  }
+                }}
+                className="bg-slate-950/60 text-white border-white/20 text-center"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+                onClick={() => setSelectedMonth(previous => shiftMonthKey(previous, 1))}
+              >
+                下月
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3">
+                <p className="text-xs text-emerald-100/90">當月收入</p>
+                <p className="text-lg font-semibold text-emerald-200">{formatMoney(monthIncome)}</p>
+              </div>
+              <div className="rounded-lg border border-rose-300/20 bg-rose-500/10 p-3">
+                <p className="text-xs text-rose-100/90">當月支出</p>
+                <p className="text-lg font-semibold text-rose-200">{formatMoney(monthExpense)}</p>
+              </div>
+              <div className="rounded-lg border border-white/15 bg-white/5 p-3">
+                <p className="text-xs text-slate-300">淨收支</p>
+                <p className={`text-lg font-semibold ${monthNet >= 0 ? "text-emerald-200" : "text-rose-300"}`}>
+                  {formatMoney(monthNet)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/15 bg-white/5 p-3">
+                <p className="text-xs text-slate-300">記帳筆數</p>
+                <p className="text-lg font-semibold text-white">{monthTxCount} 筆</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-white/10 bg-slate-950/50 px-3 py-2 text-sm text-slate-200">{monthInsightText}</div>
+          </CardContent>
+        </Card>
+
         <Card className="border-purple-400/30 bg-slate-900/70">
           <CardHeader className="pb-3">
             <CardTitle className="text-white text-xl">距離夢想目標差額</CardTitle>
             <CardDescription className="text-slate-300">把每次記帳轉成可行動的目標節奏</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <Input
                 type="number"
                 min={0}
@@ -1833,28 +1991,64 @@ export default function MvpAccountingPage() {
               />
             </div>
 
-            <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-1">
-              <p className="text-sm text-slate-200">
-                目標剩餘：<span className="font-semibold text-white">{formatMoney(dreamPlan.targetLeft)}</span>
-              </p>
-              <p className="text-sm text-slate-200">
-                每月建議存：<span className="font-semibold text-white">{formatMoney(dreamPlan.shouldSavePerMonth)}</span>
-              </p>
-              <p className="text-sm text-slate-200">
-                本月淨額：<span className="font-semibold text-white">{formatMoney(monthNet)}</span>
-              </p>
-              <p className={`text-sm ${dreamPlan.gap <= 0 ? "text-emerald-300" : "text-amber-200"}`}>
-                {dreamPlan.gap <= 0
-                  ? "本月節奏良好，已在目標軌道上。"
-                  : `本月還差 ${formatMoney(dreamPlan.gap)}，優先控制可調整支出。`}
-              </p>
+            <div className="rounded-xl border border-fuchsia-300/25 bg-gradient-to-r from-fuchsia-500/20 via-purple-500/10 to-indigo-500/20 p-4">
+              <p className="text-xs text-fuchsia-100/90">離夢想目標還差</p>
+              <p className="mt-1 text-3xl font-bold tracking-wide text-white">{formatMoney(dreamPlan.targetLeft)}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="border-white/25 bg-white/10 text-white">
+                  已存 {formatMoney(dreamSaved)}
+                </Badge>
+                <Badge variant="outline" className="border-white/25 bg-white/10 text-white">
+                  目標 {formatMoney(dreamTarget)}
+                </Badge>
+                <Badge variant="outline" className="border-white/25 bg-white/10 text-white">
+                  剩餘 {dreamPlan.monthsLeft} 個月
+                </Badge>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span>累積達成率</span>
+                  <span className="font-semibold text-white">{dreamCompletionRate.toFixed(1)}%</span>
+                </div>
+                <Progress
+                  value={dreamCompletionRate}
+                  className="h-2.5 bg-white/10 [&>div]:bg-gradient-to-r [&>div]:from-indigo-400 [&>div]:to-fuchsia-400"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span>本月節奏</span>
+                  <span className="font-semibold text-white">{dreamPaceLabel}</span>
+                </div>
+                <Progress value={monthPaceRate} className={`h-2.5 bg-white/10 ${dreamPaceStatus.barClass}`} />
+                <p className={`text-sm ${dreamPaceStatus.textClass}`}>
+                  {dreamPaceStatus.title}：{dreamPaceStatus.hint}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-md border border-white/10 bg-slate-950/40 p-2">
+                  <p className="text-xs text-slate-300">每月建議存</p>
+                  <p className="text-sm font-semibold text-white">{formatMoney(dreamPlan.shouldSavePerMonth)}</p>
+                </div>
+                <div className="rounded-md border border-white/10 bg-slate-950/40 p-2">
+                  <p className="text-xs text-slate-300">當月淨額</p>
+                  <p className={`text-sm font-semibold ${monthNet >= 0 ? "text-emerald-200" : "text-rose-300"}`}>
+                    {formatMoney(monthNet)}
+                  </p>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
 
         <Card className="border-white/15 bg-slate-900/70">
           <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-white text-xl">最近 3 筆紀錄</CardTitle>
+            <CardTitle className="text-white text-xl">{formatMonthLabel(selectedMonth)} 最近 3 筆</CardTitle>
             <div className="flex items-center gap-2">
               <Button
                 type="button"
@@ -1886,7 +2080,7 @@ export default function MvpAccountingPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {recentTransactions.length === 0 ? (
-              <p className="text-slate-300 text-sm">還沒有交易資料，按下下方「＋」開始。</p>
+              <p className="text-slate-300 text-sm">{formatMonthLabel(selectedMonth)} 尚無交易資料，按下下方「＋」開始。</p>
             ) : (
               recentTransactions.map(item => (
                 <div key={item.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
