@@ -773,6 +773,27 @@ function formatMoney(value: number): string {
   return CURRENCY.format(value)
 }
 
+function cashFlowToneClass(value: number): string {
+  if (value > 0) return "text-emerald-300"
+  if (value < 0) return "text-rose-400"
+  return "text-slate-300"
+}
+
+function formatCompactCashFlow(value: number): string {
+  const prefix = value > 0 ? "+" : value < 0 ? "-" : ""
+  const absValue = Math.abs(value)
+
+  if (absValue >= 10000) {
+    return `${prefix}${(absValue / 10000).toFixed(1)}萬`
+  }
+
+  if (absValue >= 1000) {
+    return `${prefix}${(absValue / 1000).toFixed(0)}k`
+  }
+
+  return `${prefix}${formatMoney(absValue)}`
+}
+
 function formatMonthLabel(monthKey: string): string {
   const [year, month] = monthKey.split("-")
   if (!year || !month) return monthKey
@@ -1914,7 +1935,7 @@ export default function MvpAccountingPage() {
   const recentTransactions = sortedCurrentMonthTransactions.slice(0, 3)
 
   const groupedByDate = useMemo(() => {
-    const groups: { date: string; label: string; transactions: Transaction[]; dayExpense: number }[] = []
+    const groups: { date: string; label: string; transactions: Transaction[]; dayNet: number }[] = []
     const map = new Map<string, Transaction[]>()
     for (const tx of sortedCurrentMonthTransactions) {
       const key = tx.occurred_at
@@ -1922,8 +1943,10 @@ export default function MvpAccountingPage() {
       map.get(key)!.push(tx)
     }
     for (const [date, txList] of map) {
+      const dayIncome = txList.filter(t => t.direction === "income").reduce((s, t) => s + t.amount, 0)
       const dayExpense = txList.filter(t => t.direction === "expense").reduce((s, t) => s + t.amount, 0)
-      groups.push({ date, label: formatDateGroup(date), transactions: txList, dayExpense })
+      const dayNet = dayIncome - dayExpense
+      groups.push({ date, label: formatDateGroup(date), transactions: txList, dayNet })
     }
     return groups
   }, [sortedCurrentMonthTransactions])
@@ -2807,7 +2830,6 @@ export default function MvpAccountingPage() {
                 >
                   <p className="text-xs text-rose-200/70 mb-0.5">總支出</p>
                   <p className="text-base sm:text-lg font-bold text-rose-300 leading-tight">{formatMoney(monthExpense)}</p>
-                  <ArrowRight className="h-3 w-3 text-rose-200/40 mt-1" />
                 </button>
 
                 <button
@@ -2821,7 +2843,6 @@ export default function MvpAccountingPage() {
                 >
                   <p className="text-xs text-emerald-200/70 mb-0.5">總收入</p>
                   <p className="text-base sm:text-lg font-bold text-emerald-300 leading-tight">{formatMoney(monthIncome)}</p>
-                  <ArrowLeft className="h-3 w-3 text-emerald-200/40 mt-1 ml-auto" />
                 </button>
               </div>
             ) : (() => {
@@ -2854,7 +2875,10 @@ export default function MvpAccountingPage() {
                       const dayTxs = currentMonthTx.filter(tx => tx.occurred_at === dateStr)
                       const dayExp = dayTxs.filter(tx => tx.direction === "expense").reduce((s, tx) => s + tx.amount, 0)
                       const dayInc = dayTxs.filter(tx => tx.direction === "income").reduce((s, tx) => s + tx.amount, 0)
+                      const dayNet = dayInc - dayExp
                       const hasData = dayExp > 0 || dayInc > 0
+                      const dayNetClass = cashFlowToneClass(dayNet)
+                      const compactNet = formatCompactCashFlow(dayNet)
 
                       return (
                         <button
@@ -2882,11 +2906,9 @@ export default function MvpAccountingPage() {
                           </span>
                           {hasData && (
                             <div className="flex flex-col items-center gap-0.5 mt-auto mb-1">
-                              {dayExp > 0 && (
-                                <span className="text-[8px] sm:text-[9px] text-rose-400 font-medium leading-none">
-                                  {dayExp >= 10000 ? `${(dayExp / 10000).toFixed(1)}萬` : dayExp >= 1000 ? `${(dayExp / 1000).toFixed(0)}k` : formatMoney(dayExp)}
-                                </span>
-                              )}
+                              <span className={`text-[8px] sm:text-[9px] font-medium leading-none ${dayNetClass}`}>
+                                {compactNet}
+                              </span>
                               <div className="flex gap-0.5">
                                 {dayExp > 0 && <span className="w-1 h-1 rounded-full bg-rose-400" />}
                                 {dayInc > 0 && <span className="w-1 h-1 rounded-full bg-emerald-400" />}
@@ -2971,8 +2993,11 @@ export default function MvpAccountingPage() {
               <div key={group.date}>
                 <div className="flex items-center justify-between px-1 mb-1.5">
                   <p className="text-xs sm:text-sm font-medium text-slate-200">{group.label}</p>
-                  {group.dayExpense > 0 && (
-                    <p className="text-xs text-rose-300">-{formatMoney(group.dayExpense)}</p>
+                  {group.dayNet !== 0 && (
+                    <p className={`text-xs font-medium ${cashFlowToneClass(group.dayNet)}`}>
+                      {group.dayNet > 0 ? "+" : "-"}
+                      {formatMoney(Math.abs(group.dayNet))}
+                    </p>
                   )}
                 </div>
                 <Card className="border-white/10 bg-slate-900/70">
