@@ -89,6 +89,7 @@ interface DraftTransaction extends Transaction {
   selected: boolean
   parse_error?: string
   reasoning_tags?: string[]
+  categoryTouched?: boolean
 }
 
 interface ImportJob {
@@ -1446,6 +1447,8 @@ export default function MvpAccountingPage() {
   const [step, setStep] = useState<PageStep>("home")
   const [modeSheetOpen, setModeSheetOpen] = useState(false)
   const [activeMode, setActiveMode] = useState<InputMode>("text_single")
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null)
+  const [calendarDaySheetOpen, setCalendarDaySheetOpen] = useState(false)
 
   const [transactions, setTransactions] = useState<Transaction[]>(DEMO_TRANSACTIONS)
   const [drafts, setDrafts] = useState<DraftTransaction[]>([])
@@ -1795,6 +1798,19 @@ export default function MvpAccountingPage() {
     () => [...currentMonthTx].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
     [currentMonthTx]
   )
+  const selectedCalendarTransactions = useMemo(() => {
+    if (!calendarSelectedDate) return []
+    return sortedTransactions.filter(item => item.occurred_at === calendarSelectedDate)
+  }, [calendarSelectedDate, sortedTransactions])
+  const calendarDayIncome = useMemo(
+    () => selectedCalendarTransactions.filter(item => item.direction === "income").reduce((sum, item) => sum + item.amount, 0),
+    [selectedCalendarTransactions]
+  )
+  const calendarDayExpense = useMemo(
+    () => selectedCalendarTransactions.filter(item => item.direction === "expense").reduce((sum, item) => sum + item.amount, 0),
+    [selectedCalendarTransactions]
+  )
+  const calendarDayNet = calendarDayIncome - calendarDayExpense
 
   const monthIncome = useMemo(
     () => currentMonthTx.filter(item => item.direction === "income").reduce((sum, item) => sum + item.amount, 0),
@@ -1809,6 +1825,14 @@ export default function MvpAccountingPage() {
   const monthExpenseCount = currentMonthTx.filter(item => item.direction === "expense").length
   const monthAverageExpense = monthExpenseCount > 0 ? monthExpense / monthExpenseCount : 0
   const monthSavingRate = monthIncome > 0 ? (monthNet / monthIncome) * 100 : null
+  useEffect(() => {
+    if (!calendarSelectedDate) return
+    if (step !== "home" || homeViewMode !== "calendar" || !calendarSelectedDate.startsWith(selectedMonth)) {
+      setCalendarSelectedDate(null)
+      setCalendarDaySheetOpen(false)
+    }
+  }, [calendarSelectedDate, homeViewMode, selectedMonth, step])
+
   const monthInsightText = useMemo(() => {
     if (monthTxCount === 0) {
       return `${formatMonthLabel(selectedMonth)} 尚未有記帳資料。`
@@ -2290,6 +2314,17 @@ export default function MvpAccountingPage() {
     if (missingDateIndex !== -1) {
       setBanner("有交易尚未填寫日期，請補齊後再送出。")
       const el = document.querySelector<HTMLInputElement>(`[data-draft-date="${missingDateIndex}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
+        setTimeout(() => el.focus(), 300)
+      }
+      return
+    }
+
+    const uncategorizedIndex = drafts.findIndex(item => item.category_key.includes("other") && !item.categoryTouched)
+    if (uncategorizedIndex !== -1) {
+      setBanner("有交易的類別尚未確認，請在下拉選單中明確選擇類別後再儲存。")
+      const el = document.querySelector<HTMLSelectElement>(`[data-draft-category="${uncategorizedIndex}"]`)
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "center" })
         setTimeout(() => el.focus(), 300)
@@ -2815,19 +2850,34 @@ export default function MvpAccountingPage() {
                       const day = i + 1
                       const dateStr = `${hcY}-${String(hcM).padStart(2, "0")}-${String(day).padStart(2, "0")}`
                       const isToday = dateStr === hcTodayStr
+                      const isSelected = dateStr === calendarSelectedDate
                       const dayTxs = currentMonthTx.filter(tx => tx.occurred_at === dateStr)
                       const dayExp = dayTxs.filter(tx => tx.direction === "expense").reduce((s, tx) => s + tx.amount, 0)
                       const dayInc = dayTxs.filter(tx => tx.direction === "income").reduce((s, tx) => s + tx.amount, 0)
                       const hasData = dayExp > 0 || dayInc > 0
 
                       return (
-                        <div
+                        <button
                           key={day}
-                          className={`h-12 sm:h-14 rounded-lg flex flex-col items-center pt-1 ${
-                            isToday ? "bg-amber-400/15 border border-amber-400/40" : ""
+                          type="button"
+                          onClick={() => {
+                            setCalendarSelectedDate(dateStr)
+                            setCalendarDaySheetOpen(true)
+                          }}
+                          aria-label={`${dateStr} ${dayTxs.length} 筆記帳`}
+                          className={`h-12 sm:h-14 w-full rounded-lg flex flex-col items-center pt-1 transition-colors ${
+                            isSelected
+                              ? "bg-indigo-500/25 border border-indigo-400/50"
+                              : isToday
+                              ? "bg-amber-400/15 border border-amber-400/40 hover:bg-amber-400/20"
+                              : hasData
+                              ? "border border-transparent hover:bg-white/8"
+                              : "border border-transparent hover:bg-white/5"
                           }`}
                         >
-                          <span className={`text-[11px] font-medium leading-none ${isToday ? "text-amber-300" : "text-slate-300"}`}>
+                          <span className={`text-[11px] font-medium leading-none ${
+                            isSelected ? "text-indigo-100" : isToday ? "text-amber-300" : "text-slate-300"
+                          }`}>
                             {day}
                           </span>
                           {hasData && (
@@ -2843,7 +2893,7 @@ export default function MvpAccountingPage() {
                               </div>
                             </div>
                           )}
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
@@ -4155,28 +4205,42 @@ export default function MvpAccountingPage() {
                           </div>
                         </div>
                       </div>
-                      <select
-                        value={draft.category_key}
-                        onChange={event => {
-                          const key = event.target.value
-                          const category = CATEGORY_BY_KEY.get(key)
-                          if (!category) return
-                          updateDraft(index, item => ({
-                            ...item,
-                            category_key: key,
-                            domain: category.domain,
-                            direction: category.direction,
-                            user_overridden: item.ai_predicted_category_key !== key,
-                          }))
-                        }}
-                        className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2.5 text-sm text-white min-h-[44px]"
-                      >
-                        {TAXONOMY.map(category => (
-                          <option key={category.category_key} value={category.category_key}>
-                            {categoryLabel(category.category_key)}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-slate-500 px-0.5">
+                          類別 <span className="text-rose-400">*</span>
+                          {draft.category_key.includes("other") && !draft.categoryTouched && (
+                            <span className="ml-1.5 text-amber-400">← 請確認或選擇類別</span>
+                          )}
+                        </p>
+                        <select
+                          data-draft-category={index}
+                          value={draft.category_key}
+                          onChange={event => {
+                            const key = event.target.value
+                            const category = CATEGORY_BY_KEY.get(key)
+                            if (!category) return
+                            updateDraft(index, item => ({
+                              ...item,
+                              category_key: key,
+                              domain: category.domain,
+                              direction: category.direction,
+                              user_overridden: item.ai_predicted_category_key !== key,
+                              categoryTouched: true,
+                            }))
+                          }}
+                          className={`w-full rounded-md border bg-slate-950/80 px-2 py-2.5 text-sm text-white min-h-[44px] ${
+                            draft.category_key.includes("other") && !draft.categoryTouched
+                              ? "border-amber-400/60 ring-1 ring-amber-400/30"
+                              : "border-white/20"
+                          }`}
+                        >
+                          {TAXONOMY.map(category => (
+                            <option key={category.category_key} value={category.category_key}>
+                              {categoryLabel(category.category_key)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                     <Button
                       type="button"
@@ -4204,7 +4268,7 @@ export default function MvpAccountingPage() {
                   {lowConfidence && (
                     <div className="rounded-md border border-amber-300/30 bg-amber-500/10 p-2 text-xs text-amber-100 flex items-start gap-2">
                       <CircleAlert className="h-4 w-4 shrink-0 mt-0.5" />
-                      低置信度，建議你點一下類別後再儲存（但不會阻擋儲存）。
+                      AI 置信度偏低，請在上方下拉選單中確認或修正類別後再儲存。
                     </div>
                   )}
 
@@ -5401,6 +5465,77 @@ export default function MvpAccountingPage() {
           </Button>
         </div>
       )}
+
+      <Sheet open={calendarDaySheetOpen} onOpenChange={setCalendarDaySheetOpen}>
+        <SheetContent side="bottom" className="bg-slate-950 text-white border-white/10 max-h-[75dvh] overflow-y-auto rounded-t-2xl safe-bottom">
+          <SheetHeader>
+            <SheetTitle className="text-white text-base sm:text-lg">
+              {calendarSelectedDate
+                ? new Date(`${calendarSelectedDate}T00:00:00`).toLocaleDateString("zh-TW", {
+                    month: "numeric",
+                    day: "numeric",
+                    weekday: "long",
+                  })
+                : "當日記帳"}
+            </SheetTitle>
+            <SheetDescription className="text-slate-300 text-xs sm:text-sm">
+              快速查看這一天的收入、支出與每筆記錄。
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-4 space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2.5">
+                <p className="text-[10px] text-rose-200/70">支出</p>
+                <p className="mt-1 text-sm font-semibold text-rose-300">{formatMoney(calendarDayExpense)}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2.5">
+                <p className="text-[10px] text-emerald-200/70">收入</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-300">{formatMoney(calendarDayIncome)}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
+                <p className="text-[10px] text-slate-400">結餘</p>
+                <p className={`mt-1 text-sm font-semibold ${calendarDayNet >= 0 ? "text-emerald-200" : "text-rose-200"}`}>
+                  {calendarDayNet > 0 ? "+" : ""}
+                  {formatMoney(calendarDayNet)}
+                </p>
+              </div>
+            </div>
+
+            {selectedCalendarTransactions.length === 0 ? (
+              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center">
+                <p className="text-sm text-slate-300">這一天還沒有記帳資料。</p>
+                <p className="mt-1 text-xs text-slate-500">可以直接切回主頁按下方「＋」新增。</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedCalendarTransactions.map(item => (
+                  <div key={item.id} className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-white break-words">{item.note}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
+                            {categoryLabel(item.category_key)}
+                          </Badge>
+                          <span className="text-[10px] sm:text-[11px] text-slate-400">{modeLabel(item.input_mode)}</span>
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className={`text-sm font-semibold ${item.direction === "income" ? "text-emerald-300" : "text-rose-300"}`}>
+                          {item.direction === "income" ? "+" : "-"}
+                          {formatMoney(item.amount)}
+                        </p>
+                        <p className="mt-1 text-[10px] text-slate-500">{directionLabel(item.direction)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={modeSheetOpen} onOpenChange={setModeSheetOpen}>
         <SheetContent side="bottom" className="bg-slate-950 text-white border-white/10 max-h-[75dvh] overflow-y-auto rounded-t-2xl safe-bottom">
