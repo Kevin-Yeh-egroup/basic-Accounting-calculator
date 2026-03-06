@@ -2677,20 +2677,6 @@ export default function MvpAccountingPage() {
                     : <PieChartIcon className="h-4 w-4" />
                   }
                 </button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="border-white/20 bg-white/5 text-white hover:bg-white/10 text-xs min-h-[40px] px-2.5"
-                  onClick={() => {
-                    setStep("overview")
-                    setOverviewQuery("")
-                    setOverviewDirectionFilter("all")
-                    cancelEditTransaction()
-                  }}
-                >
-                  全部
-                </Button>
               </div>
             </div>
 
