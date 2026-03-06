@@ -6000,7 +6000,7 @@ export default function MvpAccountingPage() {
       <Sheet open={calendarDaySheetOpen} onOpenChange={setCalendarDaySheetOpen}>
         <SheetContent
           side="bottom"
-          className="family-warm-theme relative overflow-x-hidden overflow-y-auto border-[#efd9cf] bg-[linear-gradient(180deg,#fffaf7_0%,#fdf2ec_100%)] text-[#6d5864] max-h-[75dvh] rounded-t-[28px] shadow-[0_-18px_48px_rgba(236,201,184,0.32)] safe-bottom"
+          className="family-warm-theme overflow-x-hidden overflow-y-auto border-[#efd9cf] bg-[linear-gradient(180deg,#fffaf7_0%,#fdf2ec_100%)] text-[#6d5864] max-h-[75dvh] rounded-t-[28px] shadow-[0_-18px_48px_rgba(236,201,184,0.32)] safe-bottom"
         >
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#f4cec0] to-transparent" />
           <div className="pointer-events-none absolute right-0 top-0 h-28 w-28 rounded-full bg-[#f8dfd4]/45" />
