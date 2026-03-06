@@ -120,6 +120,18 @@ interface TransactionEditDraft {
   note: string
 }
 
+interface AiFinanceFeedbackCard {
+  id: string
+  badge: string
+  title: string
+  metricLabel: string
+  metricValue: string
+  comparisonText: string
+  detailText: string
+  tipText: string
+  amountClassName: string
+}
+
 type RecurringFrequency = "weekly" | "monthly" | "yearly"
 
 interface RecurringEntry {
@@ -284,14 +296,14 @@ const MODE_OPTIONS: Array<{
 }> = [
   {
     mode: "text_single",
-    title: "文字/語音/流水帳輸入",
-    description: "同一輸入框，系統自動判斷單筆或流水帳批次",
+    title: "輸入一筆收支",
+    description: "一句話、語音或貼上多筆都可以，系統會自動判斷收支、日期與類別",
     icon: NotebookPen,
   },
   {
     mode: "file_import",
-    title: "上傳輸入（照片／Excel／PDF／Word／PPT）",
-    description: "一次上傳，自動切換照片或檔案匯入流程",
+    title: "上傳帳單或檔案",
+    description: "照片、Excel、PDF 等檔案會先整理成草稿，再讓你確認",
     icon: FileUp,
   },
 ]
@@ -802,6 +814,25 @@ function formatMonthLabel(monthKey: string): string {
 
 const WEEKDAY_ZH = ["日", "一", "二", "三", "四", "五", "六"]
 const MAX_RECURRING_OCCURRENCES = 36
+const AI_FEEDBACK_DRINK_KEYWORDS = [
+  "飲料",
+  "咖啡",
+  "奶茶",
+  "手搖",
+  "珍奶",
+  "拿鐵",
+  "美式",
+  "紅茶",
+  "綠茶",
+  "烏龍",
+  "豆漿",
+  "果汁",
+  "latte",
+  "coffee",
+  "tea",
+  "drink",
+]
+const AI_FEEDBACK_LAST_PICK_KEY = "mvp_ai_feedback_last_pick"
 const RECURRING_WEEKDAY_OPTIONS = [
   { value: 1, label: "一" },
   { value: 2, label: "二" },
@@ -922,6 +953,60 @@ function parseYmdDate(dateString: string): Date | null {
     return null
   }
   return date
+}
+
+function getWeekRange(dateString: string): { start: string; end: string } {
+  const date = parseYmdDate(dateString)
+  if (!date) {
+    return { start: dateString, end: dateString }
+  }
+
+  const day = date.getDay()
+  const offsetToMonday = day === 0 ? -6 : 1 - day
+  const start = new Date(date)
+  start.setDate(date.getDate() + offsetToMonday)
+
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+
+  return {
+    start: formatYmd(start.getFullYear(), start.getMonth() + 1, start.getDate()),
+    end: formatYmd(end.getFullYear(), end.getMonth() + 1, end.getDate()),
+  }
+}
+
+function isDateWithinRange(dateString: string, start: string, end: string): boolean {
+  return dateString >= start && dateString <= end
+}
+
+function pickRandomFeedbackId(options: AiFinanceFeedbackCard[], lastPickedId: string | null): string {
+  if (options.length === 0) return ""
+  if (options.length === 1) return options[0].id
+
+  const candidateIds = options
+    .map(item => item.id)
+    .filter(id => id !== lastPickedId)
+
+  const pool = candidateIds.length > 0 ? candidateIds : options.map(item => item.id)
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
+function formatChangeAgainstPrevious(current: number, previous: number): string {
+  if (current === 0 && previous === 0) return "和上週差不多"
+  if (previous <= 0) return current > 0 ? "比上週開始有支出" : "和上週差不多"
+
+  const changeRate = ((current - previous) / previous) * 100
+  if (Math.abs(changeRate) < 8) return "和上週差不多"
+
+  return `比上週${changeRate > 0 ? "多" : "少"} ${Math.round(Math.abs(changeRate))}%`
+}
+
+function isDrinkRelatedTransaction(item: Transaction): boolean {
+  if (item.direction !== "expense") return false
+
+  const categoryName = CATEGORY_BY_KEY.get(item.category_key)?.display_name_zh ?? ""
+  const content = `${item.note} ${categoryName}`.toLowerCase()
+  return AI_FEEDBACK_DRINK_KEYWORDS.some(keyword => content.includes(keyword))
 }
 
 function daysInMonth(year: number, month: number): number {
@@ -1357,9 +1442,9 @@ function speechErrorLabel(errorCode: string): string {
 }
 
 function modeLabel(mode: InputMode): string {
-  if (mode === "voice_single" || mode === "bulk_text") return "文字/語音/流水帳輸入"
-  if (mode === "photo_single") return "上傳輸入（照片）"
-  if (mode === "file_import") return "上傳輸入（檔案）"
+  if (mode === "text_single" || mode === "voice_single" || mode === "bulk_text") return "智慧輸入"
+  if (mode === "photo_single") return "照片上傳"
+  if (mode === "file_import") return "檔案匯入"
   const found = MODE_OPTIONS.find(item => item.mode === mode)
   return found ? found.title : mode
 }
@@ -1368,6 +1453,212 @@ function categoryLabel(categoryKey: string): string {
   const category = CATEGORY_BY_KEY.get(categoryKey)
   if (!category) return categoryKey
   return `${domainLabel(category.domain)}${directionLabel(category.direction)}｜${category.display_name_zh}`
+}
+
+function feedbackAmountClass(current: number, previous: number): string {
+  if (current < previous) return "text-emerald-300"
+  if (current > previous) return "text-rose-300"
+  return "text-amber-200"
+}
+
+function pickFeedbackText(
+  current: number,
+  previous: number,
+  lowerText: string,
+  higherText: string,
+  sameText: string
+): string {
+  if (current < previous) return lowerText
+  if (current > previous) return higherText
+  return sameText
+}
+
+function sumTransactionAmounts(items: Transaction[]): number {
+  return items.reduce((sum, item) => sum + item.amount, 0)
+}
+
+function getFeedbackWeekRanges(referenceDate: string): {
+  currentWeekRange: { start: string; end: string }
+  previousWeekRange: { start: string; end: string }
+} {
+  const currentWeekRange = getWeekRange(referenceDate)
+  return {
+    currentWeekRange,
+    previousWeekRange: {
+      start: shiftDateByDays(currentWeekRange.start, -7),
+      end: shiftDateByDays(currentWeekRange.end, -7),
+    },
+  }
+}
+
+function createWeeklyExpenseFeedback(transactions: Transaction[]): AiFinanceFeedbackCard | null {
+  const todayKey = new Date().toISOString().slice(0, 10)
+  const { currentWeekRange, previousWeekRange } = getFeedbackWeekRanges(todayKey)
+  const currentWeekExpense = sumTransactionAmounts(
+    transactions.filter(item => item.direction === "expense" && isDateWithinRange(item.occurred_at, currentWeekRange.start, currentWeekRange.end))
+  )
+  const previousWeekExpense = sumTransactionAmounts(
+    transactions.filter(item => item.direction === "expense" && isDateWithinRange(item.occurred_at, previousWeekRange.start, previousWeekRange.end))
+  )
+
+  if (currentWeekExpense <= 0 && previousWeekExpense <= 0) return null
+
+  return {
+    id: "weekly-expense",
+    badge: "AI 支出雷達",
+    title: pickFeedbackText(
+      currentWeekExpense,
+      previousWeekExpense,
+      "本週支出有降溫，錢包終於不用全天待命。",
+      "本週支出偏熱，錢包辛苦了，但還在可控範圍。",
+      "本週支出節奏穩定，像開著財務巡航模式。"
+    ),
+    metricLabel: "本週總支出",
+    metricValue: formatMoney(currentWeekExpense),
+    comparisonText: formatChangeAgainstPrevious(currentWeekExpense, previousWeekExpense),
+    detailText: pickFeedbackText(
+      currentWeekExpense,
+      previousWeekExpense,
+      "這代表你不是沒花，而是花得更有判斷，這種收斂很有價值。",
+      "先別急著緊張，優先確認是一次性支出，還是日常花費真的升溫。",
+      "波動不大通常是好事，代表日常支出規律度其實不錯。"
+    ),
+    tipText: `建議先回看 ${currentWeekRange.start.slice(5).replace("-", "/")} - ${currentWeekRange.end.slice(5).replace("-", "/")} 裡最大的 1 到 2 筆支出，通常主因很快就會浮出來。`,
+    amountClassName: feedbackAmountClass(currentWeekExpense, previousWeekExpense),
+  }
+}
+
+function createWeeklyDrinkFeedback(transactions: Transaction[]): AiFinanceFeedbackCard | null {
+  const todayKey = new Date().toISOString().slice(0, 10)
+  const { currentWeekRange, previousWeekRange } = getFeedbackWeekRanges(todayKey)
+  const currentWeekDrinkSpend = sumTransactionAmounts(
+    transactions.filter(item => isDrinkRelatedTransaction(item) && isDateWithinRange(item.occurred_at, currentWeekRange.start, currentWeekRange.end))
+  )
+  const previousWeekDrinkSpend = sumTransactionAmounts(
+    transactions.filter(item => isDrinkRelatedTransaction(item) && isDateWithinRange(item.occurred_at, previousWeekRange.start, previousWeekRange.end))
+  )
+
+  if (currentWeekDrinkSpend <= 0 && previousWeekDrinkSpend <= 0) return null
+
+  return {
+    id: "weekly-drink",
+    badge: "AI 小額偵測",
+    title: pickFeedbackText(
+      currentWeekDrinkSpend,
+      previousWeekDrinkSpend,
+      "本週飲料支出有收斂，糖分和預算都比較冷靜。",
+      "本週飲料有點活躍，嘴巴很快樂，預算也有感。",
+      "本週飲料支出維持恆溫，屬於熟悉的快樂配方。"
+    ),
+    metricLabel: "本週飲料花費",
+    metricValue: formatMoney(currentWeekDrinkSpend),
+    comparisonText: formatChangeAgainstPrevious(currentWeekDrinkSpend, previousWeekDrinkSpend),
+    detailText:
+      currentWeekDrinkSpend === 0
+        ? "目前沒有飲料支出紀錄，預算面板表示尊敬。"
+        : "飲料單筆不大，但累積速度常常比訊息通知還快，是很值得追的小額支出。",
+    tipText:
+      previousWeekDrinkSpend === 0 && currentWeekDrinkSpend > 0
+        ? "如果這週是臨時提神週，可以把這類支出獨立追蹤，避免它默默升級成固定班底。"
+        : "先看最常出現的是咖啡、手搖還是超商飲料，第一個調整點通常就藏在那裡。",
+    amountClassName: feedbackAmountClass(currentWeekDrinkSpend, previousWeekDrinkSpend),
+  }
+}
+
+function createMonthlyTopCategoryFeedback(
+  currentMonthTx: Transaction[],
+  monthExpense: number,
+  selectedMonth: string
+): AiFinanceFeedbackCard | null {
+  if (monthExpense <= 0) return null
+
+  const expenseByCategory = new Map<string, number>()
+  currentMonthTx.forEach(item => {
+    if (item.direction !== "expense") return
+    expenseByCategory.set(item.category_key, (expenseByCategory.get(item.category_key) ?? 0) + item.amount)
+  })
+
+  const topExpenseCategory = [...expenseByCategory.entries()].sort((a, b) => b[1] - a[1])[0]
+  if (!topExpenseCategory) return null
+
+  const [topCategoryKey, topCategoryAmount] = topExpenseCategory
+  const topCategoryName = CATEGORY_BY_KEY.get(topCategoryKey)?.display_name_zh ?? categoryLabel(topCategoryKey)
+  const share = Math.round((topCategoryAmount / monthExpense) * 100)
+
+  return {
+    id: "monthly-top-category",
+    badge: "AI 類別熱區",
+    title: `本月「${topCategoryName}」戲份偏多，幾乎是支出主角。`,
+    metricLabel: "本月累積",
+    metricValue: formatMoney(topCategoryAmount),
+    comparisonText: `占本月支出 ${share}%`,
+    detailText: "最大宗支出最值得先看，因為只要微調一點，通常就比到處省 10 塊更有感。",
+    tipText: `${formatMonthLabel(selectedMonth)} 若只先挑一類來優化，建議就從這裡開始，效率通常最高。`,
+    amountClassName: "text-amber-200",
+  }
+}
+
+function createMonthlyPeakDayFeedback(currentMonthTx: Transaction[]): AiFinanceFeedbackCard | null {
+  const expenseByDate = new Map<string, { total: number; count: number }>()
+  currentMonthTx.forEach(item => {
+    if (item.direction !== "expense") return
+    const previous = expenseByDate.get(item.occurred_at) ?? { total: 0, count: 0 }
+    expenseByDate.set(item.occurred_at, {
+      total: previous.total + item.amount,
+      count: previous.count + 1,
+    })
+  })
+
+  const peakExpenseDay = [...expenseByDate.entries()].sort((a, b) => b[1].total - a[1].total)[0]
+  if (!peakExpenseDay) return null
+
+  const [date, stats] = peakExpenseDay
+  return {
+    id: "monthly-peak-day",
+    badge: "AI 波峰掃描",
+    title: "這一天是本月支出高峰，像預算圖上的小山頭。",
+    metricLabel: formatDateGroup(date),
+    metricValue: formatMoney(stats.total),
+    comparisonText: `當天共 ${stats.count} 筆支出`,
+    detailText: "高峰日不一定是問題，但很值得確認是聚餐、補貨，還是情緒性消費在偷偷加戲。",
+    tipText: "如果類似高峰反覆出現，之後可以提前為那種情境預留預算，會輕鬆很多。",
+    amountClassName: "text-rose-300",
+  }
+}
+
+function createMonthlyNetFeedback(
+  monthNet: number,
+  monthSavingRate: number | null,
+  monthTxCount: number,
+  monthInsightText: string
+): AiFinanceFeedbackCard | null {
+  if (monthTxCount <= 0) return null
+
+  return {
+    id: "monthly-net",
+    badge: "AI 現金流摘要",
+    title: monthNet >= 0 ? "本月結餘為正，帳戶狀態像在默默回血。" : "本月結餘暫時偏緊，先別慌，這通常不是劇終。",
+    metricLabel: "本月結餘",
+    metricValue: monthNet > 0 ? `+${formatMoney(monthNet)}` : formatMoney(monthNet),
+    comparisonText: monthSavingRate === null ? `已記 ${monthTxCount} 筆` : `目前儲蓄率 ${monthSavingRate.toFixed(1)}%`,
+    detailText: monthInsightText,
+    tipText: monthNet >= 0 ? "這種節奏可以延續，再慢慢優化大額支出，會比突然極端節省更穩。" : "先抓最大變因，不用一次修全部，通常把主因調整好，結餘就會先回來。",
+    amountClassName: monthNet >= 0 ? "text-emerald-300" : "text-rose-300",
+  }
+}
+
+function createStarterFeedback(): AiFinanceFeedbackCard {
+  return {
+    id: "starter",
+    badge: "AI 已待命",
+    title: "先記幾筆，我就能開始讀懂你的金流個性。",
+    metricLabel: "啟動條件",
+    metricValue: "3 筆",
+    comparisonText: "早餐、飲料、交通最適合啟動分析",
+    detailText: "不用很多資料，幾筆日常支出就足夠讓我先抓出你的花費節奏。",
+    tipText: "資料一多，這裡就會像專屬儀表板一樣，給你帶點幽默的重點提醒。",
+    amountClassName: "text-indigo-200",
+  }
 }
 
 function mapBusinessExpenseCategory(displayName: string): string {
@@ -1468,7 +1759,7 @@ export default function MvpAccountingPage() {
   const [step, setStep] = useState<PageStep>("home")
   const [modeSheetOpen, setModeSheetOpen] = useState(false)
   const [activeMode, setActiveMode] = useState<InputMode>("text_single")
-  const [entryImportAdvancedOpen, setEntryImportAdvancedOpen] = useState(false)
+  const [_entryImportAdvancedOpen, setEntryImportAdvancedOpen] = useState(false)
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null)
   const [calendarDaySheetOpen, setCalendarDaySheetOpen] = useState(false)
 
@@ -1515,6 +1806,7 @@ export default function MvpAccountingPage() {
   const [pickerYear, setPickerYear] = useState(() => Number(new Date().toISOString().slice(0, 4)))
 
   const [banner, setBanner] = useState<string | null>(null)
+  const [aiFinanceFeedbackId, setAiFinanceFeedbackId] = useState<string | null>(null)
   const [storageReady, setStorageReady] = useState(false)
   const [overviewQuery, setOverviewQuery] = useState("")
   const [overviewDirectionFilter, setOverviewDirectionFilter] = useState<OverviewDirectionFilter>("all")
@@ -1954,13 +2246,61 @@ export default function MvpAccountingPage() {
     return groups
   }, [sortedCurrentMonthTransactions])
 
+  const aiFinanceFeedbackOptions = useMemo(() => {
+    const feedbacks = [
+      createWeeklyExpenseFeedback(transactions),
+      createWeeklyDrinkFeedback(transactions),
+      createMonthlyTopCategoryFeedback(currentMonthTx, monthExpense, selectedMonth),
+      createMonthlyPeakDayFeedback(currentMonthTx),
+      createMonthlyNetFeedback(monthNet, monthSavingRate, monthTxCount, monthInsightText),
+    ].filter((item): item is AiFinanceFeedbackCard => item !== null)
+
+    return feedbacks.length > 0 ? feedbacks : [createStarterFeedback()]
+  }, [currentMonthTx, monthExpense, monthInsightText, monthNet, monthSavingRate, monthTxCount, selectedMonth, transactions])
+
+  useEffect(() => {
+    if (aiFinanceFeedbackOptions.length === 0) {
+      setAiFinanceFeedbackId(null)
+      return
+    }
+
+    setAiFinanceFeedbackId(currentId => {
+      if (currentId && aiFinanceFeedbackOptions.some(item => item.id === currentId)) {
+        return currentId
+      }
+
+      let lastPickedId: string | null = null
+      try {
+        lastPickedId = globalThis.localStorage?.getItem(AI_FEEDBACK_LAST_PICK_KEY) ?? null
+      } catch {
+        lastPickedId = null
+      }
+
+      const nextId = pickRandomFeedbackId(aiFinanceFeedbackOptions, lastPickedId)
+
+      try {
+        globalThis.localStorage?.setItem(AI_FEEDBACK_LAST_PICK_KEY, nextId)
+      } catch {
+        // Ignore storage failures and still use the freshly selected feedback.
+      }
+
+      return nextId
+    })
+  }, [aiFinanceFeedbackOptions])
+
+  const aiFinanceFeedback = useMemo(() => {
+    if (aiFinanceFeedbackOptions.length === 0) return null
+
+    return aiFinanceFeedbackOptions.find(item => item.id === aiFinanceFeedbackId) ?? aiFinanceFeedbackOptions[0]
+  }, [aiFinanceFeedbackId, aiFinanceFeedbackOptions])
+
   const donutData = useMemo(() => {
     if (monthIncome === 0 && monthExpense === 0) {
-      return [{ name: "無資料", value: 1, color: "#475569" }]
+      return [{ name: "無資料", value: 1, color: "#8c6a58" }]
     }
     return [
-      { name: "收入", value: monthIncome, color: "#34d399" },
-      { name: "支出", value: monthExpense, color: "#fb7185" },
+      { name: "收入", value: monthIncome, color: "#9eb18b" },
+      { name: "支出", value: monthExpense, color: "#d3876a" },
     ]
   }, [monthIncome, monthExpense])
 
@@ -2089,6 +2429,52 @@ export default function MvpAccountingPage() {
     setImportJob(null)
   }
 
+  function startSmartEntry(mode: InputMode = "text_single") {
+    const today = new Date().toISOString().slice(0, 10)
+    setEntryEditingId(null)
+    setEntryDirection("expense")
+    setEntryCategory("")
+    setEntryCategoryNeedsAttention(false)
+    setEntryCalcDisplay("0")
+    setEntryNote("")
+    setEntryDate(today)
+    setEntryAdvancedMode("none")
+    setEntryImportAdvancedOpen(false)
+    setBanner(null)
+    setDrafts([])
+    resetQuickInputs()
+    setActiveMode(mode)
+    setStep("quick-add")
+  }
+
+  function startManualEntry() {
+    const today = new Date().toISOString().slice(0, 10)
+    recognitionRef.current?.stop()
+    setIsListening(false)
+    setSpeechPreview("")
+    setSpeechError(null)
+    setEntryEditingId(null)
+    setEntryDirection("expense")
+    setEntryCategory("")
+    setEntryCategoryNeedsAttention(false)
+    setEntryCalcDisplay("0")
+    setEntryNote("")
+    setEntryDate(today)
+    setEntryAdvancedMode("none")
+    setEntryImportAdvancedOpen(false)
+    setBanner(null)
+    setStep("new-entry")
+  }
+
+  function switchQuickAddMode(mode: InputMode) {
+    recognitionRef.current?.stop()
+    setIsListening(false)
+    setSpeechPreview("")
+    setSpeechError(null)
+    setActiveMode(mode)
+    setBanner(null)
+  }
+
   function toggleSpeechInput() {
     const recognition = recognitionRef.current
     if (!recognition) {
@@ -2114,11 +2500,7 @@ export default function MvpAccountingPage() {
 
   function openMode(mode: InputMode) {
     setModeSheetOpen(false)
-    setActiveMode(mode)
-    setStep("quick-add")
-    setBanner(null)
-    setDrafts([])
-    resetQuickInputs()
+    startSmartEntry(mode)
   }
 
   function buildMockFileDrafts(files: File[]): DraftTransaction[] {
@@ -2831,8 +3213,8 @@ export default function MvpAccountingPage() {
                   }}
                   className="absolute top-0 left-0 text-left rounded-xl p-2.5 hover:bg-rose-500/10 active:bg-rose-500/20 transition-colors"
                 >
-                  <p className="text-xs text-rose-200/70 mb-0.5">總支出</p>
-                  <p className="text-base sm:text-lg font-bold text-rose-300 leading-tight">{formatMoney(monthExpense)}</p>
+                  <p className="mb-0.5 text-xs font-medium text-[#b87467]">總支出</p>
+                  <p className="text-base sm:text-lg font-bold leading-tight text-[#ab6158]">{formatMoney(monthExpense)}</p>
                 </button>
 
                 <button
@@ -2844,8 +3226,8 @@ export default function MvpAccountingPage() {
                   }}
                   className="absolute top-0 right-0 text-right rounded-xl p-2.5 hover:bg-emerald-500/10 active:bg-emerald-500/20 transition-colors"
                 >
-                  <p className="text-xs text-emerald-200/70 mb-0.5">總收入</p>
-                  <p className="text-base sm:text-lg font-bold text-emerald-300 leading-tight">{formatMoney(monthIncome)}</p>
+                  <p className="mb-0.5 text-xs font-medium text-[#8a9674]">總收入</p>
+                  <p className="text-base sm:text-lg font-bold leading-tight text-[#6f8766]">{formatMoney(monthIncome)}</p>
                 </button>
               </div>
             ) : (() => {
@@ -2983,12 +3365,62 @@ export default function MvpAccountingPage() {
           </CardContent>
         </Card>
 
+        {aiFinanceFeedback && (
+          <Card className="relative overflow-hidden border-[#efd9cf] bg-[linear-gradient(135deg,#fffaf7_0%,#fdeee7_58%,#f9e4db_100%)] shadow-[0_18px_42px_rgba(236,201,184,0.28)]">
+            <div className="pointer-events-none absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-[#f6d8ca]/55" />
+            <div className="pointer-events-none absolute right-0 top-0 h-32 w-32 rounded-full bg-white/35" />
+            <div className="pointer-events-none absolute right-10 top-8 h-20 w-20 rounded-full bg-[#f8dfd4]/40" />
+            <CardContent className="relative pt-4 pb-4 sm:pt-5 sm:pb-5 space-y-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-[#f2ddd4] bg-white/75 px-2.5 py-1 text-[11px] font-medium text-[#8f6873]">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      AI 財務回饋
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#d49f73]">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#f0b986]" />
+                      <span>今日觀察</span>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-base sm:text-lg font-semibold leading-snug text-[#6d5864]">{aiFinanceFeedback.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-[#8f7a84]">{aiFinanceFeedback.detailText}</p>
+                </div>
+
+                <div className="shrink-0 rounded-2xl border border-white/70 bg-white/72 px-3.5 py-3 text-left sm:min-w-[188px] shadow-[0_10px_24px_rgba(241,217,204,0.42)]">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-[#b79a8f]">{aiFinanceFeedback.metricLabel}</p>
+                  <p className={`mt-2 text-2xl sm:text-3xl font-semibold font-mono tracking-tight ${aiFinanceFeedback.amountClassName}`}>
+                    {aiFinanceFeedback.metricValue}
+                  </p>
+                  <p className="mt-2 text-[11px] text-[#a58a92]">
+                    {aiFinanceFeedback.comparisonText}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[#f0dfd6] bg-white/60 px-3 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-[#efd9cf] bg-[#fff4ef] px-2.5 py-1 text-[11px] font-medium text-[#9f6a70]">
+                    {aiFinanceFeedback.badge}
+                  </span>
+                  <span className="text-[10px] tracking-[0.18em] text-[#c4a39a]">PERSONALIZED INSIGHT</span>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-[#816d79]">{aiFinanceFeedback.tipText}</p>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 border-t border-[#f0ddd3] pt-3 text-[11px] text-[#baa19b]">
+                <span>依近期紀錄自動挑出一則重點</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* 夢想目標差額：暫時隱藏，後續開放 */}
 
         {sortedCurrentMonthTransactions.length === 0 ? (
           <div className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-8 text-center">
             <p className="text-slate-300 text-sm">{formatMonthLabel(selectedMonth)} 尚無記帳資料</p>
-            <p className="text-slate-400 text-xs mt-1">按下方「＋」開始記帳</p>
+            <p className="text-slate-400 text-xs mt-1">按下方「＋」輸入一筆收支</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -3571,17 +4003,21 @@ export default function MvpAccountingPage() {
             variant="outline"
             className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
             onClick={() => {
-              setStep("home")
-              setEntryAdvancedMode("none")
-              setEntryImportAdvancedOpen(false)
-              setEntryEditingId(null)
+              if (isEditing) {
+                setStep("home")
+                setEntryAdvancedMode("none")
+                setEntryImportAdvancedOpen(false)
+                setEntryEditingId(null)
+                return
+              }
+              startSmartEntry()
             }}
           >
             <ArrowLeft className="mr-1.5 h-4 w-4" />
-            返回
+            {isEditing ? "返回" : "返回智慧輸入"}
           </Button>
           <Badge variant="outline" className={`text-xs ${isEditing ? "border-amber-300/40 bg-amber-500/10 text-amber-200" : "border-indigo-300/40 bg-indigo-500/10 text-indigo-200"}`}>
-            {isEditing ? "編輯交易" : "新增記帳"}
+            {isEditing ? "編輯交易" : "手動輸入"}
           </Badge>
           {isEditing ? (
             <Button
@@ -3599,77 +4035,28 @@ export default function MvpAccountingPage() {
           )}
         </div>
 
-        {!isEditing && <div className="rounded-lg border border-indigo-300/30 bg-indigo-500/5 p-2.5 mb-3 space-y-2">
-          <Button
-            type="button"
-            size="sm"
-            className={`min-h-[46px] w-full gap-2 text-sm ${
-              entryAdvancedMode === "text"
-                ? "bg-indigo-300 text-slate-950 hover:bg-indigo-200"
-                : "bg-indigo-500 text-white hover:bg-indigo-400"
-            }`}
-            onClick={() => {
-              setActiveMode("text_single")
-              setEntryAdvancedMode("text")
-              setEntryImportAdvancedOpen(false)
-              setBanner(null)
-            }}
-          >
-            <Mic className="h-4 w-4" />
-            多筆／語音輸入
-          </Button>
-          <p className="text-[11px] text-slate-300 leading-relaxed">
-            一次貼上多筆內容或直接語音輸入，系統會自動判斷收入/支出並分類到對應類型。
-          </p>
-          {entryAdvancedMode === "file" ? (
-            <div className="rounded-md border border-indigo-300/30 bg-indigo-500/10 px-3 py-2">
-              <p className="text-[11px] text-indigo-100">進階設定已啟用：上傳檔案匯入</p>
+        {!isEditing && (
+          <div className="rounded-lg border border-white/10 bg-slate-900/70 p-3 mb-3 space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-white">手動輸入</p>
+              <p className="text-[11px] leading-relaxed text-slate-300">
+                自己選擇收支、類型、日期與金額；如果想更快記一筆，可以改用智慧輸入讓系統先幫你判斷。
+              </p>
             </div>
-          ) : (
-            <div className="overflow-hidden rounded-md border border-white/10 bg-slate-950/40">
-              <button
-                type="button"
-                className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
-                  entryImportAdvancedOpen ? "bg-white/10 text-white" : "text-slate-200 hover:bg-white/5"
-                }`}
-                onClick={() => setEntryImportAdvancedOpen(prev => !prev)}
-                aria-expanded={entryImportAdvancedOpen}
-                aria-controls="entry-import-advanced"
-              >
-                <div className="min-w-0">
-                  <p className="text-xs font-medium">進階設定</p>
-                  <p className="text-[11px] text-slate-400">需要照片或 Excel、PDF 等檔案時再展開</p>
-                </div>
-                <ArrowRight className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${entryImportAdvancedOpen ? "rotate-90 text-indigo-200" : ""}`} />
-              </button>
-              {entryImportAdvancedOpen && (
-                <div id="entry-import-advanced" className="space-y-2 border-t border-white/10 px-2.5 py-2.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="min-h-[40px] w-full gap-1.5 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                    onClick={() => {
-                      setActiveMode("file_import")
-                      setEntryAdvancedMode("file")
-                      setBanner(null)
-                    }}
-                  >
-                    <FileUp className="h-3.5 w-3.5" />
-                    上傳檔案匯入
-                  </Button>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    適合照片、Excel、PDF、Word、PPT 等檔案，解析後可先確認再匯入。
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>}
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-[42px] w-full gap-2 border-indigo-300/30 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+              onClick={() => startSmartEntry()}
+            >
+              <Sparkles className="h-4 w-4" />
+              改用智慧輸入
+            </Button>
+          </div>
+        )}
 
-        {entryAdvancedMode === "none" ? (
-          <div className="flex items-center justify-center mb-3">
-            <div className="flex rounded-full border border-white/20 overflow-hidden">
+        <div className="flex items-center justify-center mb-3">
+          <div className="flex rounded-full border border-white/20 overflow-hidden">
               <button
                 type="button"
                 onClick={() => {
@@ -3698,17 +4085,10 @@ export default function MvpAccountingPage() {
               >
                 收入
               </button>
-            </div>
           </div>
-        ) : (
-          <div className="mb-3 rounded-md border border-indigo-300/30 bg-indigo-500/10 px-3 py-2">
-            <p className="text-xs text-indigo-100">智慧輸入模式：系統會自動判斷收入／支出與對應類別</p>
-          </div>
-        )}
+        </div>
 
-        {entryAdvancedMode === "none" && (
-          <>
-            {renderEntryCategorySection()}
+        {renderEntryCategorySection()}
 
             <div className="flex items-center justify-between gap-1.5 mb-2">
               <Button
@@ -3795,8 +4175,6 @@ export default function MvpAccountingPage() {
                 </div>
               ))}
             </div>
-          </>
-        )}
         {entryAdvancedMode === "text" && (
           <div className="flex-1 space-y-3">
             <p className="text-xs text-slate-300">輸入多筆或使用語音，系統會自動判斷收入/支出與類別，完成後前往確認頁。</p>
@@ -3914,7 +4292,7 @@ export default function MvpAccountingPage() {
   }
 
   function renderQuickAdd() {
-    const activeMeta = MODE_OPTIONS.find(option => option.mode === activeMode)
+    const isFileMode = activeMode === "file_import"
     return (
       <div className="space-y-3 sm:space-y-4">
         <div className="flex items-center justify-between gap-2">
@@ -3922,6 +4300,10 @@ export default function MvpAccountingPage() {
             variant="outline"
             className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
             onClick={() => {
+              recognitionRef.current?.stop()
+              setIsListening(false)
+              setSpeechPreview("")
+              setSpeechError(null)
               setStep("home")
               setBanner(null)
             }}
@@ -3930,23 +4312,37 @@ export default function MvpAccountingPage() {
             回到主頁
           </Button>
           <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10 text-xs shrink-0">
-            {activeMeta?.title}
+            {isFileMode ? "檔案匯入" : "智慧輸入"}
           </Badge>
         </div>
 
         <Card className="border-white/20 bg-slate-900/70">
-          <CardHeader>
-            <CardTitle className="text-white text-base sm:text-lg">{activeMeta?.title}</CardTitle>
-            <CardDescription className="text-slate-300 text-xs sm:text-sm">{activeMeta?.description}</CardDescription>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-white text-base sm:text-lg">
+              {isFileMode ? "上傳帳單或檔案" : "輸入一筆收支"}
+            </CardTitle>
+            <CardDescription className="text-slate-300 text-xs sm:text-sm">
+              {isFileMode
+                ? "照片、Excel、PDF 等檔案都能先整理成草稿，再確認後匯入。"
+                : "一句話、語音或貼上多筆都可以，系統會自動判斷收支、日期與類別。"}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {activeMode === "text_single" && (
+            {!isFileMode ? (
               <>
+                <div className="rounded-xl border border-indigo-300/20 bg-indigo-500/5 p-3 space-y-2">
+                  <p className="text-xs text-indigo-100">沒有寫日期就預設今天，也可以補記昨天、上週或收入。</p>
+                  <div className="flex flex-wrap gap-2 text-[11px] text-slate-300">
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">午餐120</span>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">昨天咖啡80</span>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">薪水50000</span>
+                  </div>
+                </div>
                 <Textarea
                   value={singleText}
                   onChange={event => setSingleText(event.target.value)}
                   className="min-h-[140px] sm:min-h-[180px] bg-slate-950/60 border-white/20 text-white placeholder:text-slate-400 text-sm sm:text-base"
-                  placeholder="可輸入單筆或貼上整段流水帳；系統會自動判斷並批次拆行。例：早餐 65、咖啡 80、捷運 30"
+                  placeholder="例如：午餐120、昨天咖啡80、薪水50000"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <Button
@@ -3966,14 +4362,11 @@ export default function MvpAccountingPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] text-sm"
-                    onClick={() => {
-                      setSingleText("")
-                      setSpeechPreview("")
-                      setSpeechError(null)
-                    }}
+                    className="min-h-[44px] gap-1.5 border-white/20 bg-white/5 text-white hover:bg-white/10 text-sm"
+                    onClick={() => switchQuickAddMode("file_import")}
                   >
-                    清空內容
+                    <FileUp className="h-4 w-4 shrink-0" />
+                    <span className="truncate">上傳帳單/檔案</span>
                   </Button>
                 </div>
                 {isListening && (
@@ -3990,16 +4383,40 @@ export default function MvpAccountingPage() {
                   </div>
                 )}
                 {!isSpeechSupported && (
-                  <p className="text-xs text-amber-200">此瀏覽器暫不支援語音輸入，請改用手動輸入。</p>
+                  <p className="text-xs text-amber-200">此瀏覽器暫不支援語音輸入，請改用文字或手動輸入。</p>
                 )}
-                <p className="text-xs text-slate-400">不用切換模式，系統會自動判斷單筆或流水帳批次。</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-slate-400">系統會自動判斷單筆或多筆，解析後再讓你確認。</p>
+                  <button
+                    type="button"
+                    onClick={startManualEntry}
+                    className="text-xs text-indigo-200 hover:text-indigo-100 transition-colors"
+                  >
+                    改用手動輸入
+                  </button>
+                </div>
+                <Button
+                  onClick={() => handleParseInput("text_single")}
+                  className="w-full bg-indigo-500 text-white hover:bg-indigo-400 min-h-[48px] text-base"
+                  disabled={!singleText.trim()}
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  解析收支
+                </Button>
               </>
-            )}
-
-            {activeMode === "file_import" && (
+            ) : (
               <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs sm:text-sm text-slate-200">上傳後會先整理成待確認草稿，再決定是否送出。</p>
+                  <button
+                    type="button"
+                    onClick={() => switchQuickAddMode("text_single")}
+                    className="text-xs text-indigo-300 hover:text-indigo-100 transition-colors"
+                  >
+                    改回文字輸入
+                  </button>
+                </div>
                 <div className="space-y-2">
-                  <p className="text-xs sm:text-sm text-slate-200">測試模式：支援上傳任意檔案</p>
                   <Input
                     type="file"
                     multiple
@@ -4192,19 +4609,18 @@ export default function MvpAccountingPage() {
                     </Button>
                   </div>
                 )}
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={startManualEntry}
+                    className="text-xs text-indigo-200 hover:text-indigo-100 transition-colors"
+                  >
+                    改用手動輸入
+                  </button>
+                </div>
               </div>
             )}
-
-            {activeMode !== "file_import" ? (
-              <Button
-                onClick={() => handleParseInput()}
-                className="w-full bg-indigo-500 text-white hover:bg-indigo-400 min-h-[48px] text-base"
-                disabled={activeMode === "text_single" && !singleText.trim()}
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                解析並前往確認
-              </Button>
-            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -4534,9 +4950,9 @@ export default function MvpAccountingPage() {
       })
     }
 
-    const barFill = statsDetailDirection === "expense" ? "#fb7185"
-      : statsDetailDirection === "income" ? "#34d399"
-      : "#818cf8"
+    const barFill = statsDetailDirection === "expense" ? "#d3876a"
+      : statsDetailDirection === "income" ? "#9eb18b"
+      : "#c9a06a"
 
     // Category breakdown (top 5)
     const catMap = new Map<string, number>()
@@ -4577,7 +4993,7 @@ export default function MvpAccountingPage() {
     const dirTabs: { key: StatsDirection; label: string; activeClass: string }[] = [
       { key: "expense", label: "支出", activeClass: "bg-rose-500 text-white" },
       { key: "income", label: "收入", activeClass: "bg-emerald-500 text-slate-950" },
-      { key: "net", label: "結餘", activeClass: "bg-indigo-500 text-white" },
+      { key: "net", label: "結餘", activeClass: "bg-amber-600 text-white" },
     ]
 
     const timeTabs: { key: StatsTimeRange; label: string }[] = [
@@ -4795,13 +5211,13 @@ export default function MvpAccountingPage() {
                   >
                     <XAxis
                       dataKey="label"
-                      tick={{ fill: "#64748b", fontSize: 9 }}
+                      tick={{ fill: "#b79276", fontSize: 9 }}
                       axisLine={false}
                       tickLine={false}
                       interval={barMode === "daily" ? 4 : 0}
                     />
                     <YAxis
-                      tick={{ fill: "#64748b", fontSize: 9 }}
+                      tick={{ fill: "#b79276", fontSize: 9 }}
                       axisLine={false}
                       tickLine={false}
                       tickFormatter={(v: number) => {
@@ -4813,12 +5229,12 @@ export default function MvpAccountingPage() {
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#0f172a",
+                        backgroundColor: "#3f291f",
                         border: "1px solid rgba(255,255,255,0.1)",
                         borderRadius: "10px",
                         padding: "8px 12px",
                       }}
-                      labelStyle={{ color: "#94a3b8", fontSize: "11px", marginBottom: "2px" }}
+                      labelStyle={{ color: "#f0d8c2", fontSize: "11px", marginBottom: "2px" }}
                       formatter={(value: number) => [formatMoney(value), summaryLabel]}
                       itemStyle={{ color: barFill, fontSize: "12px", fontWeight: 600 }}
                       cursor={{ fill: "rgba(255,255,255,0.04)" }}
@@ -5531,10 +5947,10 @@ export default function MvpAccountingPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white">
+    <div className="family-warm-theme min-h-[100dvh] bg-[radial-gradient(circle_at_top_left,#fff9f5_0%,#fdf4ef_38%,#f8eee8_100%)] text-[#6d5864]">
       <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between backdrop-blur-sm bg-white/5 sticky top-0 z-30 safe-top">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="border-indigo-300/40 bg-indigo-500/10 text-indigo-200">
+          <Badge variant="outline" className="border-amber-200/35 bg-amber-300/10 text-amber-100">
             新版試用
           </Badge>
           <span className="text-xs text-slate-300 hidden sm:inline">輸入超省力 → 即時價值回饋</span>
@@ -5553,7 +5969,7 @@ export default function MvpAccountingPage() {
 
       <main className="mx-auto w-full max-w-2xl px-3 sm:px-4 py-4 pb-32">
         {banner && (
-          <div className="mb-4 rounded-md border border-indigo-300/30 bg-indigo-500/10 px-3 py-2 text-sm text-indigo-100">
+          <div className="mb-4 rounded-md border border-amber-200/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
             {banner}
           </div>
         )}
@@ -5572,20 +5988,9 @@ export default function MvpAccountingPage() {
         <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pb-6 safe-bottom">
           <Button
             size="lg"
-            className="h-14 w-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-900/50 active:scale-95 transition-transform"
-            onClick={() => {
-              setEntryEditingId(null)
-              setEntryDirection("expense")
-              setEntryCategory("")
-              setEntryCalcDisplay("0")
-              setEntryNote("")
-              setEntryDate(new Date().toISOString().slice(0, 10))
-              setEntryAdvancedMode("none")
-              setEntryImportAdvancedOpen(false)
-              setBanner(null)
-              setStep("new-entry")
-            }}
-            aria-label="新增交易"
+            className="h-14 w-14 rounded-full bg-[linear-gradient(135deg,#f2b08c_0%,#ea8da0_100%)] text-[#fffaf8] shadow-lg shadow-[#ecc8ba]/70 hover:opacity-95 active:scale-95 transition-transform"
+            onClick={() => startSmartEntry()}
+            aria-label="輸入一筆收支"
           >
             <Plus className="h-6 w-6" />
           </Button>
@@ -5593,8 +5998,14 @@ export default function MvpAccountingPage() {
       )}
 
       <Sheet open={calendarDaySheetOpen} onOpenChange={setCalendarDaySheetOpen}>
-        <SheetContent side="bottom" className="bg-slate-950 text-white border-white/10 max-h-[75dvh] overflow-y-auto rounded-t-2xl safe-bottom">
-          <SheetHeader>
+        <SheetContent
+          side="bottom"
+          className="family-warm-theme relative overflow-x-hidden overflow-y-auto border-[#efd9cf] bg-[linear-gradient(180deg,#fffaf7_0%,#fdf2ec_100%)] text-[#6d5864] max-h-[75dvh] rounded-t-[28px] shadow-[0_-18px_48px_rgba(236,201,184,0.32)] safe-bottom"
+        >
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#f4cec0] to-transparent" />
+          <div className="pointer-events-none absolute right-0 top-0 h-28 w-28 rounded-full bg-[#f8dfd4]/45" />
+          <div className="pointer-events-none absolute -left-8 bottom-0 h-24 w-24 rounded-full bg-[#f6d8ca]/45" />
+          <SheetHeader className="relative">
             <SheetTitle className="text-white text-base sm:text-lg">
               {calendarSelectedDate
                 ? new Date(`${calendarSelectedDate}T00:00:00`).toLocaleDateString("zh-TW", {
@@ -5609,7 +6020,7 @@ export default function MvpAccountingPage() {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="mt-4 space-y-3">
+          <div className="relative mt-4 space-y-3">
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2.5">
                 <p className="text-[10px] text-rose-200/70">支出</p>

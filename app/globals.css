@@ -104,6 +104,293 @@
   }
 }
 
+@layer components {
+  .family-warm-theme {
+    --family-surface: rgba(255, 251, 247, 0.92);
+    --family-surface-strong: rgba(255, 245, 238, 0.98);
+    --family-overlay-5: rgba(255, 255, 255, 0.56);
+    --family-overlay-8: rgba(255, 248, 244, 0.66);
+    --family-overlay-10: rgba(255, 244, 238, 0.78);
+    --family-overlay-15: rgba(255, 238, 229, 0.88);
+    --family-overlay-20: rgba(252, 228, 217, 0.96);
+    --family-border: rgba(232, 204, 191, 0.72);
+    --family-border-strong: rgba(232, 204, 191, 0.9);
+    --family-text-main: #695666;
+    --family-text-soft: #786472;
+    --family-text-muted: #927f89;
+    --family-text-faint: #baa4a9;
+    --family-accent-soft: rgba(245, 201, 194, 0.34);
+    --family-accent: rgba(242, 189, 177, 0.46);
+    --family-accent-strong: rgba(239, 170, 154, 0.62);
+    --family-accent-border: rgba(233, 180, 166, 0.82);
+    --family-accent-solid: #efab90;
+    --family-accent-solid-hover: #e8977d;
+    --family-accent-text: #8a6068;
+    --family-expense-soft: rgba(242, 181, 163, 0.18);
+    --family-expense-strong: rgba(235, 157, 135, 0.3);
+    --family-expense-border: rgba(228, 161, 144, 0.72);
+    --family-expense-text: #ca7a70;
+    --family-income-soft: rgba(191, 205, 172, 0.26);
+    --family-income-strong: rgba(174, 194, 153, 0.4);
+    --family-income-border: rgba(169, 187, 149, 0.74);
+    --family-income-text: #7b8f72;
+    --family-amber-soft: rgba(245, 210, 160, 0.24);
+    --family-amber-strong: rgba(241, 190, 121, 0.38);
+    --family-amber-border: rgba(233, 191, 132, 0.76);
+    --family-amber-text: #b98b61;
+  }
+
+  .family-warm-theme .bg-slate-900,
+  .family-warm-theme .bg-slate-950,
+  .family-warm-theme .bg-slate-900\/50,
+  .family-warm-theme .bg-slate-900\/60,
+  .family-warm-theme .bg-slate-900\/70,
+  .family-warm-theme .bg-slate-900\/80,
+  .family-warm-theme .bg-slate-950\/40,
+  .family-warm-theme .bg-slate-950\/50,
+  .family-warm-theme .bg-slate-950\/60,
+  .family-warm-theme .bg-slate-950\/70,
+  .family-warm-theme .bg-slate-950\/80,
+  .family-warm-theme .bg-slate-950\/90 {
+    background-color: var(--family-surface) !important;
+  }
+
+  .family-warm-theme .bg-white\/0 {
+    background-color: transparent !important;
+  }
+
+  .family-warm-theme .bg-white\/5 {
+    background-color: var(--family-overlay-5) !important;
+  }
+
+  .family-warm-theme .bg-white\/8 {
+    background-color: var(--family-overlay-8) !important;
+  }
+
+  .family-warm-theme .bg-white\/10 {
+    background-color: var(--family-overlay-10) !important;
+  }
+
+  .family-warm-theme .bg-white\/15 {
+    background-color: var(--family-overlay-15) !important;
+  }
+
+  .family-warm-theme .bg-white\/20 {
+    background-color: var(--family-overlay-20) !important;
+  }
+
+  .family-warm-theme .border-white\/10,
+  .family-warm-theme .border-white\/15,
+  .family-warm-theme .border-white\/20 {
+    border-color: var(--family-border) !important;
+  }
+
+  .family-warm-theme .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
+    border-color: rgba(236, 199, 170, 0.1) !important;
+  }
+
+  .family-warm-theme .text-slate-300 {
+    color: var(--family-text-soft) !important;
+  }
+
+  .family-warm-theme .text-slate-200 {
+    color: var(--family-text-main) !important;
+  }
+
+  .family-warm-theme .text-slate-400 {
+    color: var(--family-text-muted) !important;
+  }
+
+  .family-warm-theme .text-slate-500 {
+    color: var(--family-text-faint) !important;
+  }
+
+  .family-warm-theme .bg-indigo-500\/5 {
+    background-color: var(--family-accent-soft) !important;
+  }
+
+  .family-warm-theme .bg-indigo-500\/10 {
+    background-color: var(--family-accent) !important;
+  }
+
+  .family-warm-theme .bg-indigo-500\/15,
+  .family-warm-theme .bg-indigo-500\/20,
+  .family-warm-theme .bg-indigo-500\/25 {
+    background-color: var(--family-accent-strong) !important;
+  }
+
+  .family-warm-theme .bg-indigo-500\/80,
+  .family-warm-theme .bg-indigo-500 {
+    background-color: var(--family-accent-solid) !important;
+  }
+
+  .family-warm-theme .border-indigo-300\/20,
+  .family-warm-theme .border-indigo-300\/30,
+  .family-warm-theme .border-indigo-300\/35,
+  .family-warm-theme .border-indigo-300\/40,
+  .family-warm-theme .border-indigo-300\/60,
+  .family-warm-theme .border-indigo-400\/30,
+  .family-warm-theme .border-indigo-400\/40,
+  .family-warm-theme .border-indigo-400\/50 {
+    border-color: var(--family-accent-border) !important;
+  }
+
+  .family-warm-theme .text-indigo-100,
+  .family-warm-theme .hover\:text-indigo-100:hover {
+    color: var(--family-accent-text) !important;
+  }
+
+  .family-warm-theme .text-indigo-200,
+  .family-warm-theme .hover\:text-indigo-200:hover {
+    color: #9d7177 !important;
+  }
+
+  .family-warm-theme .text-indigo-300,
+  .family-warm-theme .hover\:text-indigo-300:hover {
+    color: #bf7d6d !important;
+  }
+
+  .family-warm-theme .hover\:bg-white\/10:hover {
+    background-color: var(--family-overlay-10) !important;
+  }
+
+  .family-warm-theme .hover\:bg-white\/15:hover {
+    background-color: var(--family-overlay-15) !important;
+  }
+
+  .family-warm-theme .active\:bg-white\/10:active {
+    background-color: var(--family-overlay-10) !important;
+  }
+
+  .family-warm-theme .active\:bg-white\/15:active,
+  .family-warm-theme .active\:bg-white\/20:active {
+    background-color: var(--family-overlay-15) !important;
+  }
+
+  .family-warm-theme .hover\:bg-slate-950\/40:hover,
+  .family-warm-theme .hover\:bg-slate-950\/60:hover {
+    background-color: var(--family-surface-strong) !important;
+  }
+
+  .family-warm-theme .hover\:bg-indigo-500\/20:hover {
+    background-color: var(--family-accent-strong) !important;
+  }
+
+  .family-warm-theme .hover\:bg-indigo-400:hover {
+    background-color: var(--family-accent-solid-hover) !important;
+  }
+
+  .family-warm-theme .focus-visible\:border-indigo-400:focus-visible {
+    border-color: var(--family-accent-border) !important;
+  }
+
+  .family-warm-theme .text-white,
+  .family-warm-theme .hover\:text-white:hover {
+    color: var(--family-text-main) !important;
+  }
+
+  .family-warm-theme .text-white\/80 {
+    color: var(--family-text-soft) !important;
+  }
+
+  .family-warm-theme .bg-rose-500\/10,
+  .family-warm-theme .bg-rose-500\/15 {
+    background-color: var(--family-expense-soft) !important;
+  }
+
+  .family-warm-theme .bg-rose-500\/20 {
+    background-color: var(--family-expense-strong) !important;
+  }
+
+  .family-warm-theme .border-rose-300\/30,
+  .family-warm-theme .border-rose-300\/35,
+  .family-warm-theme .border-rose-300\/40,
+  .family-warm-theme .border-rose-300\/60,
+  .family-warm-theme .border-rose-400\/20,
+  .family-warm-theme .border-rose-400\/30,
+  .family-warm-theme .border-rose-400\/50 {
+    border-color: var(--family-expense-border) !important;
+  }
+
+  .family-warm-theme .text-rose-100,
+  .family-warm-theme .text-rose-200,
+  .family-warm-theme .text-rose-300,
+  .family-warm-theme .hover\:text-rose-100:hover,
+  .family-warm-theme .hover\:text-rose-200:hover,
+  .family-warm-theme .hover\:text-rose-300:hover {
+    color: var(--family-expense-text) !important;
+  }
+
+  .family-warm-theme .hover\:bg-rose-500\/10:hover,
+  .family-warm-theme .hover\:bg-rose-500\/20:hover {
+    background-color: var(--family-expense-strong) !important;
+  }
+
+  .family-warm-theme .bg-emerald-500\/10,
+  .family-warm-theme .bg-emerald-500\/15 {
+    background-color: var(--family-income-soft) !important;
+  }
+
+  .family-warm-theme .bg-emerald-500\/20 {
+    background-color: var(--family-income-strong) !important;
+  }
+
+  .family-warm-theme .border-emerald-300\/20,
+  .family-warm-theme .border-emerald-300\/35,
+  .family-warm-theme .border-emerald-300\/60,
+  .family-warm-theme .border-emerald-400\/20,
+  .family-warm-theme .border-emerald-400\/30,
+  .family-warm-theme .border-emerald-400\/50 {
+    border-color: var(--family-income-border) !important;
+  }
+
+  .family-warm-theme .text-emerald-100,
+  .family-warm-theme .text-emerald-200,
+  .family-warm-theme .text-emerald-300,
+  .family-warm-theme .hover\:text-emerald-100:hover,
+  .family-warm-theme .hover\:text-emerald-200:hover,
+  .family-warm-theme .hover\:text-emerald-300:hover {
+    color: var(--family-income-text) !important;
+  }
+
+  .family-warm-theme .hover\:bg-emerald-500\/10:hover,
+  .family-warm-theme .hover\:bg-emerald-500\/20:hover {
+    background-color: var(--family-income-strong) !important;
+  }
+
+  .family-warm-theme .bg-amber-500\/10,
+  .family-warm-theme .bg-amber-400\/10,
+  .family-warm-theme .bg-amber-400\/15 {
+    background-color: var(--family-amber-soft) !important;
+  }
+
+  .family-warm-theme .bg-amber-500\/15,
+  .family-warm-theme .bg-amber-500\/20,
+  .family-warm-theme .bg-amber-400 {
+    background-color: var(--family-amber-strong) !important;
+  }
+
+  .family-warm-theme .border-amber-300\/35,
+  .family-warm-theme .border-amber-300\/40,
+  .family-warm-theme .border-amber-400\/40 {
+    border-color: var(--family-amber-border) !important;
+  }
+
+  .family-warm-theme .text-amber-100,
+  .family-warm-theme .text-amber-200,
+  .family-warm-theme .text-amber-300 {
+    color: var(--family-amber-text) !important;
+  }
+
+  .family-warm-theme .hover\:bg-amber-400:hover {
+    background-color: #efbe79 !important;
+  }
+
+  .family-warm-theme .shadow-indigo-900\/50 {
+    box-shadow: 0 18px 40px rgba(228, 191, 172, 0.28) !important;
+  }
+}
+
 @keyframes progressBar {
   0% {
     width: 0%;
