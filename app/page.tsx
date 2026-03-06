@@ -1468,6 +1468,7 @@ export default function MvpAccountingPage() {
   const [step, setStep] = useState<PageStep>("home")
   const [modeSheetOpen, setModeSheetOpen] = useState(false)
   const [activeMode, setActiveMode] = useState<InputMode>("text_single")
+  const [entryImportAdvancedOpen, setEntryImportAdvancedOpen] = useState(false)
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null)
   const [calendarDaySheetOpen, setCalendarDaySheetOpen] = useState(false)
 
@@ -1475,6 +1476,7 @@ export default function MvpAccountingPage() {
   const [drafts, setDrafts] = useState<DraftTransaction[]>([])
   const [importJob, setImportJob] = useState<ImportJob | null>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const entryCategorySectionRef = useRef<HTMLDivElement | null>(null)
   const entryDateInputRef = useRef<HTMLInputElement | null>(null)
 
   const [singleText, setSingleText] = useState("")
@@ -1503,6 +1505,7 @@ export default function MvpAccountingPage() {
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10))
   const [entryAdvancedMode, setEntryAdvancedMode] = useState<"none" | "text" | "file">("none")
   const [entryEditingId, setEntryEditingId] = useState<string | null>(null)
+  const [entryCategoryNeedsAttention, setEntryCategoryNeedsAttention] = useState(false)
 
   const [dreamTarget, setDreamTarget] = useState(200000)
   const [dreamSaved, setDreamSaved] = useState(20000)
@@ -3358,15 +3361,33 @@ export default function MvpAccountingPage() {
     input.click()
   }
 
+  function focusEntryCategorySelection() {
+    const section = entryCategorySectionRef.current
+    if (!section) return
+
+    section.scrollIntoView({ behavior: "smooth", block: "start" })
+
+    globalThis.setTimeout(() => {
+      const firstOption = section.querySelector<HTMLButtonElement>("[data-entry-category-option]")
+      if (firstOption) {
+        firstOption.focus()
+        return
+      }
+      section.focus()
+    }, 250)
+  }
+
   function openEntryForEdit(tx: Transaction) {
     const dir = tx.direction === "income" || tx.direction === "expense" ? tx.direction : "expense"
     setEntryEditingId(tx.id)
     setEntryDirection(dir)
     setEntryCategory(tx.category_key)
+    setEntryCategoryNeedsAttention(false)
     setEntryCalcDisplay(String(tx.amount))
     setEntryNote(tx.note)
     setEntryDate(tx.occurred_at)
     setEntryAdvancedMode("none")
+    setEntryImportAdvancedOpen(false)
     setBanner(null)
     setStep("new-entry")
   }
@@ -3387,10 +3408,22 @@ export default function MvpAccountingPage() {
     const amount = calcEvaluate()
     if (amount <= 0) return
 
+    if (!entryCategory) {
+      setEntryCategoryNeedsAttention(true)
+      setBanner("請先在上方選擇一個類型，再完成送出。")
+      focusEntryCategorySelection()
+      return
+    }
+
     const category = CATEGORY_BY_KEY.get(entryCategory)
-    const fallbackKey =
-      entryDirection === "expense" ? "life_expense_other" : "life_income_other"
-    const resolvedCategory = category ?? CATEGORY_BY_KEY.get(fallbackKey)!
+    if (!category) {
+      setBanner("找不到對應的類型，請重新選擇。")
+      setEntryCategoryNeedsAttention(true)
+      focusEntryCategorySelection()
+      return
+    }
+
+    setEntryCategoryNeedsAttention(false)
 
     if (entryEditingId) {
       setTransactions(prev =>
@@ -3401,14 +3434,14 @@ export default function MvpAccountingPage() {
             occurred_at: entryDate,
             amount,
             direction: entryDirection,
-            domain: resolvedCategory.domain,
-            category_key: resolvedCategory.category_key,
-            note: entryNote.trim() || resolvedCategory.display_name_zh,
-            user_overridden: t.ai_predicted_category_key !== resolvedCategory.category_key,
+            domain: category.domain,
+            category_key: category.category_key,
+            note: entryNote.trim() || category.display_name_zh,
+            user_overridden: t.ai_predicted_category_key !== category.category_key,
           }
         })
       )
-      setBanner(`已更新：${resolvedCategory.display_name_zh} ${formatMoney(amount)}`)
+      setBanner(`已更新：${category.display_name_zh} ${formatMoney(amount)}`)
     } else {
       const tx: Transaction = {
         id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -3416,24 +3449,108 @@ export default function MvpAccountingPage() {
         occurred_at: entryDate,
         amount,
         direction: entryDirection,
-        domain: resolvedCategory.domain,
-        category_key: resolvedCategory.category_key,
-        note: entryNote.trim() || resolvedCategory.display_name_zh,
+        domain: category.domain,
+        category_key: category.category_key,
+        note: entryNote.trim() || category.display_name_zh,
         input_mode: "text_single",
-        ai_predicted_category_key: resolvedCategory.category_key,
+        ai_predicted_category_key: category.category_key,
         ai_confidence: 1,
         user_overridden: false,
       }
       setTransactions(prev => [...prev, tx])
-      setBanner(`已新增：${resolvedCategory.display_name_zh} ${formatMoney(amount)}`)
+      setBanner(`已新增：${category.display_name_zh} ${formatMoney(amount)}`)
     }
 
     setEntryEditingId(null)
     setEntryCalcDisplay("0")
     setEntryNote("")
     setEntryCategory("")
+    setEntryCategoryNeedsAttention(false)
     setEntryDate(new Date().toISOString().slice(0, 10))
     setStep("home")
+  }
+
+  function renderEntryCategorySection() {
+    if (entryAdvancedMode !== "none") return null
+
+    const needsCategoryHint = entryCategoryNeedsAttention && !entryCategory
+    const categorySectionTone = needsCategoryHint
+      ? "border-amber-300/40 bg-amber-500/10 ring-1 ring-amber-400/20"
+      : "border-white/10 bg-white/0"
+
+    return (
+      <>
+        <div
+          ref={entryCategorySectionRef}
+          tabIndex={-1}
+          className={`mb-3 rounded-xl border p-2.5 transition-colors focus:outline-none ${categorySectionTone}`}
+        >
+          <div className="mb-2 flex items-center justify-between gap-3 px-0.5">
+            <p className="text-[11px] text-slate-400">請選擇一個類型</p>
+            {needsCategoryHint && (
+              <span className="text-[11px] text-amber-200 text-right">先點一個最接近的類型，再繼續儲存</span>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-2 max-h-[180px] overflow-y-auto pr-1">
+            {entryCategories.map(cat => {
+              const isActive = entryCategory === cat.category_key
+              let categoryButtonTone = "bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 active:bg-white/15"
+
+              if (isActive) {
+                categoryButtonTone =
+                  entryDirection === "expense"
+                    ? "bg-rose-500/20 border border-rose-400/50 text-rose-200"
+                    : "bg-emerald-500/20 border border-emerald-400/50 text-emerald-200"
+              }
+
+              return (
+                <button
+                  key={cat.category_key}
+                  type="button"
+                  data-entry-category-option
+                  onClick={() => {
+                    setEntryCategory(cat.category_key)
+                    if (entryCategoryNeedsAttention) {
+                      setEntryCategoryNeedsAttention(false)
+                      setBanner(null)
+                    }
+                  }}
+                  className={`flex flex-col items-center justify-center rounded-lg py-2 px-1 min-h-[56px] text-center transition-colors ${categoryButtonTone}`}
+                >
+                  <span className="text-xs leading-tight">{cat.display_name_zh}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-white/15 bg-slate-950/60 p-2.5 mb-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-slate-400">金額</span>
+            <p className="text-2xl sm:text-3xl font-bold text-white tracking-wide text-right truncate">
+              {entryCalcDisplay === "0" ? "$0" : `$${entryCalcDisplay}`}
+            </p>
+          </div>
+          <Input
+            value={entryNote}
+            onChange={e => setEntryNote(e.target.value)}
+            className="bg-slate-950/60 border-white/20 text-white text-sm min-h-[40px]"
+            placeholder="輸入備註"
+          />
+          <div className="flex items-center gap-2">
+            {entryCategory ? (
+              <Badge variant="outline" className="border-white/20 text-slate-200 text-[10px]">
+                {categoryLabel(entryCategory)}
+              </Badge>
+            ) : (
+              <span className={`text-[11px] ${needsCategoryHint ? "text-amber-200" : "text-slate-400"}`}>
+                {needsCategoryHint ? "請先到上方點選一個類型" : "請先在上方選擇一個類型"}
+              </span>
+            )}
+          </div>
+        </div>
+      </>
+    )
   }
 
   function renderNewEntry() {
@@ -3456,6 +3573,7 @@ export default function MvpAccountingPage() {
             onClick={() => {
               setStep("home")
               setEntryAdvancedMode("none")
+              setEntryImportAdvancedOpen(false)
               setEntryEditingId(null)
             }}
           >
@@ -3482,47 +3600,71 @@ export default function MvpAccountingPage() {
         </div>
 
         {!isEditing && <div className="rounded-lg border border-indigo-300/30 bg-indigo-500/5 p-2.5 mb-3 space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={`min-h-[40px] text-xs gap-1.5 ${
-                entryAdvancedMode === "text"
-                  ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
-                  : "border-white/20 bg-white/5 text-white hover:bg-white/10"
-              }`}
-              onClick={() => {
-                setActiveMode("text_single")
-                setEntryAdvancedMode("text")
-                setBanner(null)
-              }}
-            >
-              <Mic className="h-3.5 w-3.5" />
-              多筆／語音輸入
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={`min-h-[40px] text-xs gap-1.5 ${
-                entryAdvancedMode === "file"
-                  ? "border-indigo-300/60 bg-indigo-500/20 text-indigo-100"
-                  : "border-white/20 bg-white/5 text-white hover:bg-white/10"
-              }`}
-              onClick={() => {
-                setActiveMode("file_import")
-                setEntryAdvancedMode("file")
-                setBanner(null)
-              }}
-            >
-              <FileUp className="h-3.5 w-3.5" />
-              上傳檔案匯入
-            </Button>
-          </div>
+          <Button
+            type="button"
+            size="sm"
+            className={`min-h-[46px] w-full gap-2 text-sm ${
+              entryAdvancedMode === "text"
+                ? "bg-indigo-300 text-slate-950 hover:bg-indigo-200"
+                : "bg-indigo-500 text-white hover:bg-indigo-400"
+            }`}
+            onClick={() => {
+              setActiveMode("text_single")
+              setEntryAdvancedMode("text")
+              setEntryImportAdvancedOpen(false)
+              setBanner(null)
+            }}
+          >
+            <Mic className="h-4 w-4" />
+            多筆／語音輸入
+          </Button>
           <p className="text-[11px] text-slate-300 leading-relaxed">
-            一次貼上多筆內容或上傳檔案，系統會自動判斷收入/支出並分類到對應類型。
+            一次貼上多筆內容或直接語音輸入，系統會自動判斷收入/支出並分類到對應類型。
           </p>
+          {entryAdvancedMode === "file" ? (
+            <div className="rounded-md border border-indigo-300/30 bg-indigo-500/10 px-3 py-2">
+              <p className="text-[11px] text-indigo-100">進階設定已啟用：上傳檔案匯入</p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-md border border-white/10 bg-slate-950/40">
+              <button
+                type="button"
+                className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                  entryImportAdvancedOpen ? "bg-white/10 text-white" : "text-slate-200 hover:bg-white/5"
+                }`}
+                onClick={() => setEntryImportAdvancedOpen(prev => !prev)}
+                aria-expanded={entryImportAdvancedOpen}
+                aria-controls="entry-import-advanced"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-medium">進階設定</p>
+                  <p className="text-[11px] text-slate-400">需要照片或 Excel、PDF 等檔案時再展開</p>
+                </div>
+                <ArrowRight className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${entryImportAdvancedOpen ? "rotate-90 text-indigo-200" : ""}`} />
+              </button>
+              {entryImportAdvancedOpen && (
+                <div id="entry-import-advanced" className="space-y-2 border-t border-white/10 px-2.5 py-2.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-[40px] w-full gap-1.5 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                    onClick={() => {
+                      setActiveMode("file_import")
+                      setEntryAdvancedMode("file")
+                      setBanner(null)
+                    }}
+                  >
+                    <FileUp className="h-3.5 w-3.5" />
+                    上傳檔案匯入
+                  </Button>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    適合照片、Excel、PDF、Word、PPT 等檔案，解析後可先確認再匯入。
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>}
 
         {entryAdvancedMode === "none" ? (
@@ -3566,51 +3708,7 @@ export default function MvpAccountingPage() {
 
         {entryAdvancedMode === "none" && (
           <>
-            <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-3 max-h-[180px] overflow-y-auto pr-1">
-              {entryCategories.map(cat => {
-                const isActive = entryCategory === cat.category_key
-                return (
-                  <button
-                    key={cat.category_key}
-                    type="button"
-                    onClick={() => setEntryCategory(cat.category_key)}
-                    className={`flex flex-col items-center justify-center rounded-lg py-2 px-1 min-h-[56px] text-center transition-colors ${
-                      isActive
-                        ? entryDirection === "expense"
-                          ? "bg-rose-500/20 border border-rose-400/50 text-rose-200"
-                          : "bg-emerald-500/20 border border-emerald-400/50 text-emerald-200"
-                        : "bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 active:bg-white/15"
-                    }`}
-                  >
-                    <span className="text-xs leading-tight">{cat.display_name_zh}</span>
-                  </button>
-                )
-              })}
-            </div>
-
-            <div className="rounded-lg border border-white/15 bg-slate-950/60 p-2.5 mb-2 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400">金額</span>
-                <p className="text-2xl sm:text-3xl font-bold text-white tracking-wide text-right truncate">
-                  {entryCalcDisplay === "0" ? "$0" : `$${entryCalcDisplay}`}
-                </p>
-              </div>
-              <Input
-                value={entryNote}
-                onChange={e => setEntryNote(e.target.value)}
-                className="bg-slate-950/60 border-white/20 text-white text-sm min-h-[40px]"
-                placeholder="輸入備註"
-              />
-              <div className="flex items-center gap-2">
-                {entryCategory ? (
-                  <Badge variant="outline" className="border-white/20 text-slate-200 text-[10px]">
-                    {categoryLabel(entryCategory)}
-                  </Badge>
-                ) : (
-                  <span className="text-[11px] text-slate-400">請先選擇一個類別</span>
-                )}
-              </div>
-            </div>
+            {renderEntryCategorySection()}
 
             <div className="flex items-center justify-between gap-1.5 mb-2">
               <Button
@@ -3699,7 +3797,6 @@ export default function MvpAccountingPage() {
             </div>
           </>
         )}
-
         {entryAdvancedMode === "text" && (
           <div className="flex-1 space-y-3">
             <p className="text-xs text-slate-300">輸入多筆或使用語音，系統會自動判斷收入/支出與類別，完成後前往確認頁。</p>
@@ -3792,7 +3889,10 @@ export default function MvpAccountingPage() {
                 type="button"
                 variant="outline"
                 className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[44px] text-sm"
-                onClick={() => setEntryAdvancedMode("none")}
+                onClick={() => {
+                  setEntryAdvancedMode("none")
+                  setEntryImportAdvancedOpen(false)
+                }}
               >
                 返回計算機
               </Button>
@@ -5481,6 +5581,7 @@ export default function MvpAccountingPage() {
               setEntryNote("")
               setEntryDate(new Date().toISOString().slice(0, 10))
               setEntryAdvancedMode("none")
+              setEntryImportAdvancedOpen(false)
               setBanner(null)
               setStep("new-entry")
             }}
