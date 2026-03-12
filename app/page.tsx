@@ -571,6 +571,15 @@ const TAXONOMY: TaxonomyCategory[] = [
     rules: ["life_repayment"],
   },
   {
+    category_key: "life_expense_savings",
+    display_name_zh: "儲蓄",
+    domain: "life",
+    direction: "expense",
+    aliases: ["儲蓄", "存錢", "定存", "儲金", "零存整付"],
+    examples: ["儲蓄 5000"],
+    rules: ["life_savings"],
+  },
+  {
     category_key: "life_income_family_gift",
     display_name_zh: "親友贈與",
     domain: "life",
@@ -709,6 +718,21 @@ const TAXONOMY: TaxonomyCategory[] = [
 
 const CATEGORY_BY_KEY = new Map(TAXONOMY.map(item => [item.category_key, item]))
 
+const LIFE_EXPENSE_ORDER = [
+  "life_expense_food",
+  "life_expense_clothing",
+  "life_expense_housing",
+  "life_expense_transport",
+  "life_expense_education",
+  "life_expense_fun",
+  "life_expense_telecom",
+  "life_expense_insurance",
+  "life_expense_medical",
+  "life_expense_repayment",
+  "life_expense_savings",
+  "life_expense_other",
+]
+
 const TAXONOMY_GROUPS: { label: string; keys: string[] }[] = [
   {
     label: "生意收入",
@@ -762,19 +786,33 @@ const TAXONOMY_GROUPS: { label: string; keys: string[] }[] = [
     label: "生活支出",
     keys: [
       "life_expense_food",
+      "life_expense_clothing",
       "life_expense_housing",
       "life_expense_transport",
-      "life_expense_clothing",
       "life_expense_education",
       "life_expense_fun",
-      "life_expense_medical",
-      "life_expense_insurance",
       "life_expense_telecom",
+      "life_expense_insurance",
+      "life_expense_medical",
       "life_expense_repayment",
+      "life_expense_savings",
       "life_expense_other",
     ],
   },
 ]
+
+function categoryFullLabel(categoryKey: string): string {
+  const category = CATEGORY_BY_KEY.get(categoryKey)
+  if (!category) return categoryKey
+
+  for (const group of TAXONOMY_GROUPS) {
+    if (group.keys.includes(categoryKey)) {
+      return `${group.label}-${category.display_name_zh}`
+    }
+  }
+
+  return `${domainLabel(category.domain)}${directionLabel(category.direction)}-${category.display_name_zh}`
+}
 
 function CategorySelect({
   value,
@@ -785,6 +823,8 @@ function CategorySelect({
   onValueChange: (key: string) => void
   className?: string
 }) {
+  const selectedLabel = value ? categoryFullLabel(value) : ""
+
   return (
     <Select value={value} onValueChange={onValueChange}>
       <SelectTrigger
@@ -793,7 +833,7 @@ function CategorySelect({
           "w-full rounded-md border border-white/20 bg-slate-950/80 px-3 py-2.5 text-sm text-white min-h-[44px] focus:ring-indigo-400"
         }
       >
-        <SelectValue placeholder="選擇類別" />
+        <SelectValue placeholder="選擇類別">{selectedLabel}</SelectValue>
       </SelectTrigger>
       <SelectContent className="bg-slate-900 border-white/20 text-white max-h-72">
         {TAXONOMY_GROUPS.map(group => (
@@ -1904,6 +1944,7 @@ export default function MvpAccountingPage() {
   const [fileImportTab, setFileImportTab] = useState<"expense" | "income">("expense")
 
   const [entryDirection, setEntryDirection] = useState<Exclude<Direction, "unknown">>("expense")
+  const [entryDomain, setEntryDomain] = useState<Exclude<Domain, "unknown">>("life")
   const [entryCategory, setEntryCategory] = useState("")
   const [entryCalcDisplay, setEntryCalcDisplay] = useState("0")
   const [entryNote, setEntryNote] = useState("")
@@ -2569,6 +2610,7 @@ export default function MvpAccountingPage() {
     setSpeechError(null)
     setEntryEditingId(null)
     setEntryDirection("expense")
+    setEntryDomain("life")
     setEntryCategory("")
     setEntryCategoryNeedsAttention(false)
     setEntryCalcDisplay("0")
@@ -3832,13 +3874,16 @@ export default function MvpAccountingPage() {
   }
 
   const entryCategories = useMemo(() => {
-    const filtered = TAXONOMY.filter(c => c.direction === entryDirection)
-    filtered.sort((a, b) => {
-      if (a.domain === b.domain) return 0
-      return a.domain === "life" ? -1 : 1
-    })
+    const filtered = TAXONOMY.filter(c => c.direction === entryDirection && c.domain === entryDomain)
+    if (entryDirection === "expense" && entryDomain === "life") {
+      filtered.sort((a, b) => {
+        const ai = LIFE_EXPENSE_ORDER.indexOf(a.category_key)
+        const bi = LIFE_EXPENSE_ORDER.indexOf(b.category_key)
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+      })
+    }
     return filtered
-  }, [entryDirection])
+  }, [entryDirection, entryDomain])
 
   function calcPress(key: string) {
     setEntryCalcDisplay(prev => {
@@ -3918,8 +3963,10 @@ export default function MvpAccountingPage() {
 
   function openEntryForEdit(tx: Transaction) {
     const dir = tx.direction === "income" || tx.direction === "expense" ? tx.direction : "expense"
+    const dom = tx.domain === "life" || tx.domain === "business" ? tx.domain : "life"
     setEntryEditingId(tx.id)
     setEntryDirection(dir)
+    setEntryDomain(dom)
     setEntryCategory(tx.category_key)
     setEntryCategoryNeedsAttention(false)
     setEntryCalcDisplay(String(tx.amount))
@@ -4110,18 +4157,14 @@ export default function MvpAccountingPage() {
             variant="outline"
             className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
             onClick={() => {
-              if (isEditing) {
-                setStep("home")
-                setEntryAdvancedMode("none")
-                setEntryImportAdvancedOpen(false)
-                setEntryEditingId(null)
-                return
-              }
-              startSmartEntry()
+              setStep("home")
+              setEntryAdvancedMode("none")
+              setEntryImportAdvancedOpen(false)
+              setEntryEditingId(null)
             }}
           >
             <ArrowLeft className="mr-1.5 h-4 w-4" />
-            {isEditing ? "返回" : "返回智慧輸入"}
+            返回
           </Button>
           <Badge variant="outline" className={`text-xs ${isEditing ? "border-amber-300/40 bg-amber-500/10 text-amber-200" : "border-indigo-300/40 bg-indigo-500/10 text-indigo-200"}`}>
             {isEditing ? "編輯交易" : "手動輸入"}
@@ -4138,31 +4181,21 @@ export default function MvpAccountingPage() {
               刪除
             </Button>
           ) : (
-            <div className="w-[60px]" />
-          )}
-        </div>
-
-        {!isEditing && (
-          <div className="rounded-lg border border-white/10 bg-slate-900/70 p-3 mb-3 space-y-3">
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-white">手動輸入</p>
-              <p className="text-[11px] leading-relaxed text-slate-300">
-                自己選擇收支、類型、日期與金額；如果想更快記一筆，可以改用智慧輸入讓系統先幫你判斷。
-              </p>
-            </div>
             <Button
               type="button"
               variant="outline"
-              className="min-h-[42px] w-full gap-2 border-indigo-300/30 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+              size="sm"
+              className="border-indigo-400/60 bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/30 hover:text-white hover:border-indigo-400/80 min-h-[36px] text-xs px-3 gap-1.5 transition-all"
               onClick={() => startSmartEntry()}
             >
-              <Sparkles className="h-4 w-4" />
-              改用智慧輸入
+              <Sparkles className="h-3.5 w-3.5" />
+              切換智慧輸入
             </Button>
-          </div>
-        )}
+          )}
+        </div>
 
-        <div className="flex items-center justify-center mb-3">
+
+        <div className="flex items-center justify-center gap-3 mb-3 flex-wrap">
           <div className="flex rounded-full border border-white/20 overflow-hidden">
               <button
                 type="button"
@@ -4192,6 +4225,36 @@ export default function MvpAccountingPage() {
               >
                 收入
               </button>
+          </div>
+          <div className="flex rounded-full border border-white/20 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => {
+                setEntryDomain("life")
+                setEntryCategory("")
+              }}
+              className={`px-5 py-1.5 text-sm font-medium transition-colors ${
+                entryDomain === "life"
+                  ? "bg-sky-500 text-white"
+                  : "bg-white/5 text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              生活
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEntryDomain("business")
+                setEntryCategory("")
+              }}
+              className={`px-5 py-1.5 text-sm font-medium transition-colors ${
+                entryDomain === "business"
+                  ? "bg-violet-500 text-white"
+                  : "bg-white/5 text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              生意
+            </button>
           </div>
         </div>
 
@@ -4418,9 +4481,16 @@ export default function MvpAccountingPage() {
             <ArrowLeft className="mr-1.5 h-4 w-4" />
             回到主頁
           </Button>
-          <Badge variant="outline" className="border-indigo-400/40 text-indigo-200 bg-indigo-500/10 text-xs shrink-0">
-            {isFileMode ? "檔案匯入" : "智慧輸入"}
-          </Badge>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-indigo-400/60 bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/30 hover:text-white hover:border-indigo-400/80 min-h-[36px] text-xs px-3 gap-1.5 shrink-0 transition-all"
+              onClick={startManualEntry}
+            >
+              <NotebookPen className="h-3.5 w-3.5" />
+              切換手動輸入
+            </Button>
         </div>
 
         <Card className="border-white/20 bg-slate-900/70">
@@ -4492,16 +4562,7 @@ export default function MvpAccountingPage() {
                 {!isSpeechSupported && (
                   <p className="text-xs text-amber-200">此瀏覽器暫不支援語音輸入，請改用文字或手動輸入。</p>
                 )}
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-slate-400">系統會自動判斷單筆或多筆，解析後再讓你確認。</p>
-                  <button
-                    type="button"
-                    onClick={startManualEntry}
-                    className="text-xs text-indigo-200 hover:text-indigo-100 transition-colors"
-                  >
-                    改用手動輸入
-                  </button>
-                </div>
+                <p className="text-xs text-slate-400">系統會自動判斷單筆或多筆，解析後再讓你確認。</p>
                 <Button
                   onClick={() => handleParseInput("text_single")}
                   className="w-full bg-indigo-500 text-white hover:bg-indigo-400 min-h-[48px] text-base"
@@ -4717,15 +4778,6 @@ export default function MvpAccountingPage() {
                   </div>
                 )}
 
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={startManualEntry}
-                    className="text-xs text-indigo-200 hover:text-indigo-100 transition-colors"
-                  >
-                    改用手動輸入
-                  </button>
-                </div>
               </div>
             )}
           </CardContent>
