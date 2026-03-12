@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { usePathname, useRouter } from "next/navigation"
 import { ArrowLeft, ArrowRight, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -71,8 +70,6 @@ interface MvpAccountingPageProps {
 }
 
 export function MvpAccountingPage({ initialStep = "home" }: MvpAccountingPageProps) {
-  const router = useRouter()
-  const pathname = usePathname()
   const defaultDreamDeadline = useMemo(() => {
     const deadline = new Date()
     deadline.setMonth(deadline.getMonth() + 3)
@@ -177,11 +174,26 @@ export function MvpAccountingPage({ initialStep = "home" }: MvpAccountingPagePro
 
   function goToStep(nextStep: PageStep) {
     setStep(nextStep)
-    const targetPath = STEP_ROUTE_MAP[nextStep]
-    if (pathname !== targetPath) {
-      router.push(targetPath)
+    if (typeof window !== "undefined") {
+      const targetPath = STEP_ROUTE_MAP[nextStep]
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({ step: nextStep }, "", targetPath)
+      }
+      window.scrollTo({ top: 0, behavior: "instant" })
     }
   }
+
+  useEffect(() => {
+    function handlePopState(event: PopStateEvent) {
+      const path = window.location.pathname
+      const stepEntry = Object.entries(STEP_ROUTE_MAP).find(([, p]) => p === path)
+      const nextStep = (stepEntry?.[0] ?? "home") as PageStep
+      const stateStep = event.state?.step as PageStep | undefined
+      setStep(stateStep ?? nextStep)
+    }
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
 
   useEffect(() => {
     let cancelled = false

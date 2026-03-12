@@ -1,8 +1,8 @@
 "use client"
 
-import { ArrowLeft, ArrowRight, Save, Trash2 } from "lucide-react"
+import { useState } from "react"
+import { ArrowLeft, ArrowRight, Save, Trash2, Pencil, Check, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -12,10 +12,11 @@ import { CATEGORY_BY_KEY } from "@/app/_lib/taxonomy"
 import {
   domainLabel,
   directionLabel,
-  modeLabel,
   importStatusLabel,
   normalizePaymentMethod,
   paymentMethodFieldLabel,
+  paymentMethodLabel,
+  formatMoney,
 } from "@/app/_lib/utils"
 import type { PageStep, DraftTransaction, ImportJob } from "@/app/_lib/types"
 
@@ -30,6 +31,19 @@ interface ConfirmViewProps {
   readonly onSaveDrafts: () => void
 }
 
+function formatDisplayDate(ymd: string): string {
+  if (!ymd) return ""
+  const [year, month, day] = ymd.split("-")
+  if (!year || !month || !day) return ymd
+  const currentYear = new Date().getFullYear().toString()
+  if (year === currentYear) return `${Number.parseInt(month)}月${Number.parseInt(day)}日`
+  return `${year}年${Number.parseInt(month)}月${Number.parseInt(day)}日`
+}
+
+function getDomainDotClass(domain: string): string {
+  return domain === "business" ? "bg-amber-400" : "bg-violet-400"
+}
+
 export function ConfirmView({
   drafts,
   importJob,
@@ -40,187 +54,377 @@ export function ConfirmView({
   onDraftsChange,
   onSaveDrafts,
 }: ConfirmViewProps) {
-  const selectedCount = drafts.length
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+
+  const totalIncome = drafts
+    .filter(d => d.direction === "income")
+    .reduce((sum, d) => sum + d.amount, 0)
+  const totalExpense = drafts
+    .filter(d => d.direction === "expense")
+    .reduce((sum, d) => sum + d.amount, 0)
+
+  const warningCount = drafts.filter(d => d.category_key.includes("other") && !d.categoryTouched).length
 
   return (
-    <div className="space-y-3 sm:space-y-4">
-      <div className="flex items-center justify-between gap-2">
+    <div className="space-y-4">
+
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between">
         <Button
-          variant="outline"
-          className="border-white/20 bg-white/5 text-white hover:bg-white/10 min-h-[40px] text-sm"
+          variant="ghost"
+          className="text-slate-400 hover:text-white hover:bg-white/10 -ml-2 px-2 h-9 text-sm"
           onClick={() => {
             onGoToStep("quick-add")
             onBanner(null)
           }}
         >
-          <ArrowLeft className="mr-1.5 h-4 w-4" />
-          返回輸入
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          返回
         </Button>
-        <Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/10 text-emerald-200 text-xs shrink-0">
-          待儲存 {selectedCount} 筆
-        </Badge>
+
+        <div className="text-right">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wide">待確認</p>
+          <p className="text-sm font-semibold text-white">{drafts.length} 筆記錄</p>
+        </div>
       </div>
 
-      {importJob && (
-        <Card className="border-white/20 bg-slate-900/70">
-          <CardContent className="pt-6 space-y-2">
-            <p className="text-sm text-slate-200">匯入任務：{importStatusLabel(importJob.status)}</p>
-            <p className="text-xs text-slate-400">
-              總行數 {importJob.stats.total_lines}／成功 {importJob.stats.success_lines}／需人工 {importJob.stats.needs_manual_lines}
-            </p>
-            {importJob.errors.length > 0 && (
-              <div className="rounded-md border border-amber-300/30 bg-amber-500/10 p-2 text-xs text-amber-100">
-                {importJob.errors.slice(0, 3).map((error, idx) => (
-                  <p key={`${error}_${idx}`}>- {error}</p>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      {/* ── Summary strip ── */}
+      {drafts.length > 0 && (
+        <div className={`grid gap-2.5 ${totalIncome > 0 && totalExpense > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+          {totalIncome > 0 && (
+            <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3">
+              <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-widest">收入</p>
+              <p className="mt-0.5 text-xl font-bold text-emerald-300 tabular-nums">
+                +{formatMoney(totalIncome)}
+              </p>
+            </div>
+          )}
+          {totalExpense > 0 && (
+            <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 px-4 py-3">
+              <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-widest">支出</p>
+              <p className="mt-0.5 text-xl font-bold text-rose-300 tabular-nums">
+                -{formatMoney(totalExpense)}
+              </p>
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="space-y-3">
+      {/* ── Warning banner ── */}
+      {warningCount > 0 && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3.5 py-2.5">
+          <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+          <p className="text-xs text-amber-300 flex-1">
+            有 <span className="font-semibold">{warningCount}</span> 筆類別需要確認，請點卡片右側的編輯按鈕
+          </p>
+        </div>
+      )}
+
+      {/* ── Import job info ── */}
+      {importJob && (
+        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 space-y-1.5">
+          <p className="text-sm font-medium text-slate-200">
+            匯入任務：{importStatusLabel(importJob.status)}
+          </p>
+          <p className="text-xs text-slate-400">
+            總行數 {importJob.stats.total_lines}
+            ／成功 {importJob.stats.success_lines}
+            ／需人工 {importJob.stats.needs_manual_lines}
+          </p>
+          {importJob.errors.length > 0 && (
+            <div className="mt-1 rounded-lg border border-amber-300/25 bg-amber-500/10 p-2.5 text-xs text-amber-200 space-y-0.5">
+              {importJob.errors.slice(0, 3).map((error, idx) => (
+                <p key={`${error}_${idx}`}>· {error}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Entry list ── */}
+      <div className="space-y-2.5">
         {drafts.map((draft, index) => {
-          return (
-            <Card
-              key={draft.id}
-              className="bg-slate-900/70 border-white/15"
-            >
-              <CardContent className="pt-4 sm:pt-6 space-y-3">
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 min-w-0 space-y-2">
+          const isEditing = editingIndex === index
+          const category = CATEGORY_BY_KEY.get(draft.category_key)
+          const needsAttention = draft.category_key.includes("other") && !draft.categoryTouched
+          const isIncome = draft.direction === "income"
+
+          /* ── Edit mode card ── */
+          if (isEditing) {
+            return (
+              <Card
+                key={draft.id}
+                className="bg-slate-800/90 border-indigo-500/40 ring-1 ring-indigo-500/20 shadow-lg shadow-indigo-500/5 transition-all"
+              >
+                <CardContent className="p-4 space-y-4">
+
+                  {/* Edit header */}
+                  <div className="flex items-center justify-between pb-1 border-b border-white/10">
+                    <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-widest">
+                      編輯中
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2.5 text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 gap-1"
+                        onClick={() => {
+                          onDraftsChange(prev => prev.filter((_, i) => i !== index))
+                          setEditingIndex(null)
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        刪除
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 px-3 text-[11px] bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 border border-indigo-500/30 gap-1"
+                        onClick={() => setEditingIndex(null)}
+                      >
+                        <Check className="h-3 w-3" />
+                        完成
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Note */}
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                      備註說明
+                    </p>
                     <Textarea
                       value={draft.note}
-                      onChange={event =>
+                      onChange={e =>
                         onUpdateDraft(index, item => ({
                           ...item,
-                          note: event.target.value,
-                          user_overridden: event.target.value.trim() !== item.raw_line.trim(),
+                          note: e.target.value,
+                          user_overridden: e.target.value.trim() !== item.raw_line.trim(),
                         }))
                       }
-                      className="min-h-[70px] sm:min-h-[80px] bg-slate-950/60 border-white/20 text-white text-sm"
+                      className="min-h-[72px] bg-slate-950/60 border-white/15 text-white text-sm resize-none focus-visible:ring-indigo-500/50"
                     />
-                    <div className="flex flex-col gap-2">
-                      <div className="space-y-1">
-                        <p className="text-[10px] text-slate-500 px-0.5">金額</p>
-                        <Input
-                          type="number"
-                          min={0}
-                          data-draft-amount={index}
-                          value={draft.amount}
-                          onChange={event =>
-                            onUpdateDraft(index, item => ({
-                              ...item,
-                              amount: Math.max(0, Number(event.target.value) || 0),
-                              parse_error: undefined,
-                              user_overridden: true,
-                            }))
-                          }
-                          className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
-                          placeholder="金額"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-[10px] text-slate-500 px-0.5">日期 <span className="text-rose-400">*</span></p>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-11 w-11 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                            onClick={() => onShiftDraftDate(index, -1)}
-                            aria-label="日期往前一天"
-                          >
-                            <ArrowLeft className="h-4 w-4" />
-                          </Button>
-                          <Input
-                            type="date"
-                            data-draft-date={index}
-                            value={draft.occurred_at}
-                            onChange={event => onUpdateDraft(index, item => ({ ...item, occurred_at: event.target.value }))}
-                            className={`w-full flex-1 bg-slate-950/60 text-white min-h-[44px] [color-scheme:dark] ${
-                              !draft.occurred_at ? "border-rose-400/60 ring-1 ring-rose-400/30" : "border-white/20"
-                            }`}
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-11 w-11 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                            onClick={() => onShiftDraftDate(index, 1)}
-                            aria-label="日期往後一天"
-                          >
-                            <ArrowRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-slate-500 px-0.5">
-                        類別 <span className="text-rose-400">*</span>
-                        {draft.category_key.includes("other") && !draft.categoryTouched && (
-                          <span className="ml-1.5 text-amber-400">← 請確認或選擇類別</span>
-                        )}
+                  </div>
+
+                  {/* Amount + Date */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                        金額
                       </p>
-                      <CategorySelect
-                        value={draft.category_key}
-                        onValueChange={key => {
-                          const category = CATEGORY_BY_KEY.get(key)
-                          if (!category) return
+                      <Input
+                        type="number"
+                        min={0}
+                        data-draft-amount={index}
+                        value={draft.amount}
+                        onChange={e =>
                           onUpdateDraft(index, item => ({
                             ...item,
-                            category_key: key,
-                            domain: category.domain,
-                            direction: category.direction,
-                            user_overridden: item.ai_predicted_category_key !== key,
-                            categoryTouched: true,
-                          }))
-                        }}
-                        className={`w-full rounded-md border bg-slate-950/80 px-3 py-2.5 text-sm text-white min-h-[44px] focus:ring-indigo-400 ${
-                          draft.category_key.includes("other") && !draft.categoryTouched
-                            ? "border-amber-400/60 ring-1 ring-amber-400/30"
-                            : "border-white/20"
-                        }`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-slate-500 px-0.5">{paymentMethodFieldLabel(draft.direction)}</p>
-                      <PaymentMethodSelect
-                        value={normalizePaymentMethod(draft.payment_method)}
-                        direction={draft.direction === "income" ? "income" : "expense"}
-                        onValueChange={method =>
-                          onUpdateDraft(index, item => ({
-                            ...item,
-                            payment_method: method,
+                            amount: Math.max(0, Number(e.target.value) || 0),
+                            parse_error: undefined,
                             user_overridden: true,
                           }))
                         }
+                        className="bg-slate-950/60 border-white/15 text-white min-h-[44px] focus-visible:ring-indigo-500/50"
+                        placeholder="0"
                       />
                     </div>
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                        日期 <span className="text-rose-400">*</span>
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-11 w-8 shrink-0 border-white/15 bg-white/5 text-white hover:bg-white/10"
+                          onClick={() => onShiftDraftDate(index, -1)}
+                          aria-label="日期往前一天"
+                        >
+                          <ArrowLeft className="h-3 w-3" />
+                        </Button>
+                        <Input
+                          type="date"
+                          data-draft-date={index}
+                          value={draft.occurred_at}
+                          onChange={e =>
+                            onUpdateDraft(index, item => ({ ...item, occurred_at: e.target.value }))
+                          }
+                          className={`flex-1 min-w-0 bg-slate-950/60 text-white min-h-[44px] [color-scheme:dark] focus-visible:ring-indigo-500/50 ${
+                            draft.occurred_at ? "border-white/15" : "border-rose-400/60"
+                          }`}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-11 w-8 shrink-0 border-white/15 bg-white/5 text-white hover:bg-white/10"
+                          onClick={() => onShiftDraftDate(index, 1)}
+                          aria-label="日期往後一天"
+                        >
+                          <ArrowRight className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="text-slate-300 hover:text-white hover:bg-white/10 shrink-0 h-9 w-9"
-                    onClick={() => onDraftsChange(prev => prev.filter((_, itemIndex) => itemIndex !== index))}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+
+                  {/* Category */}
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                      類別 <span className="text-rose-400">*</span>
+                      {needsAttention && (
+                        <span className="text-amber-400 normal-case font-normal">· 請選擇正確類別</span>
+                      )}
+                    </p>
+                    <CategorySelect
+                      value={draft.category_key}
+                      onValueChange={key => {
+                        const cat = CATEGORY_BY_KEY.get(key)
+                        if (!cat) return
+                        onUpdateDraft(index, item => ({
+                          ...item,
+                          category_key: key,
+                          domain: cat.domain,
+                          direction: cat.direction,
+                          user_overridden: item.ai_predicted_category_key !== key,
+                          categoryTouched: true,
+                        }))
+                      }}
+                      className={`w-full rounded-lg border bg-slate-950/80 px-3 py-2.5 text-sm text-white min-h-[44px] focus:ring-indigo-400 ${
+                        needsAttention ? "border-amber-400/60 ring-1 ring-amber-400/20" : "border-white/15"
+                      }`}
+                    />
+                  </div>
+
+                  {/* Payment method */}
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                      {paymentMethodFieldLabel(draft.direction)}
+                    </p>
+                    <PaymentMethodSelect
+                      value={normalizePaymentMethod(draft.payment_method)}
+                      direction={draft.direction === "income" ? "income" : "expense"}
+                      onValueChange={method =>
+                        onUpdateDraft(index, item => ({
+                          ...item,
+                          payment_method: method,
+                          user_overridden: true,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  {/* Domain / direction info */}
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${getDomainDotClass(draft.domain)}`} />
+                    <span className="text-[10px] text-slate-500">
+                      {domainLabel(draft.domain)} · {directionLabel(draft.direction)}
+                    </span>
+                  </div>
+
+                  {draft.parse_error && (
+                    <div className="rounded-lg border border-rose-300/30 bg-rose-500/10 p-2.5 text-xs text-rose-200">
+                      {draft.parse_error}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          }
+
+          /* ── View mode card ── */
+          return (
+            <Card
+              key={draft.id}
+              className={`bg-slate-900/60 border-white/10 transition-all duration-150 hover:border-white/20 hover:bg-slate-900/80 ${
+                needsAttention ? "border-amber-500/30 hover:border-amber-500/50" : ""
+              }`}
+            >
+              <CardContent className="px-4 py-3.5">
+                <div className="flex items-start gap-3">
+
+                  {/* Domain dot */}
+                  <span
+                    className={`mt-[5px] h-2 w-2 rounded-full shrink-0 ${getDomainDotClass(draft.domain)}`}
+                  />
+
+                  {/* Main info */}
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-sm font-semibold text-slate-100 truncate">
+                        {category?.display_name_zh ?? draft.category_key}
+                      </span>
+                      {needsAttention && (
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap">
+                      {draft.occurred_at ? (
+                        <span>{formatDisplayDate(draft.occurred_at)}</span>
+                      ) : (
+                        <span className="text-rose-400">未設定日期</span>
+                      )}
+                      {draft.payment_method && (
+                        <>
+                          <span>·</span>
+                          <span>{paymentMethodLabel(draft.payment_method)}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {draft.note && (
+                      <p className="text-xs text-slate-400 truncate leading-relaxed">{draft.note}</p>
+                    )}
+                  </div>
+
+                  {/* Amount + actions */}
+                  <div className="shrink-0 flex flex-col items-end gap-2">
+                    <p className={`text-base font-bold tabular-nums leading-none ${
+                      isIncome ? "text-emerald-400" : "text-rose-300"
+                    }`}>
+                      {isIncome ? "+" : "-"}{formatMoney(draft.amount)}
+                    </p>
+
+                    <div className="flex items-center gap-0.5">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-slate-500 hover:text-slate-200 hover:bg-white/10 transition-colors"
+                        onClick={() => setEditingIndex(index)}
+                        aria-label="編輯此筆記錄"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        onClick={() => onDraftsChange(prev => prev.filter((_, i) => i !== index))}
+                        aria-label="刪除此筆記錄"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                  <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
-                    {domainLabel(draft.domain)}／{directionLabel(draft.direction)}
-                  </Badge>
-                  <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
-                    {modeLabel(draft.input_mode)}
-                  </Badge>
-                </div>
-
-                {draft.parse_error && (
-                  <div className="rounded-md border border-rose-300/30 bg-rose-500/10 p-2 text-xs text-rose-100">
-                    {draft.parse_error}
+                {/* Warning inline action */}
+                {needsAttention && (
+                  <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2">
+                    <AlertCircle className="h-3 w-3 text-amber-400 shrink-0" />
+                    <p className="text-[11px] text-amber-300 flex-1">類別待確認</p>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200 transition-colors"
+                      onClick={() => setEditingIndex(index)}
+                    >
+                      立即確認
+                    </button>
                   </div>
                 )}
               </CardContent>
@@ -229,14 +433,38 @@ export function ConfirmView({
         })}
       </div>
 
-      <Button
-        onClick={onSaveDrafts}
-        className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 min-h-[48px] text-base"
-        disabled={drafts.length === 0}
-      >
-        <Save className="mr-2 h-4 w-4" />
-        儲存並回主頁
-      </Button>
+      {/* Empty state */}
+      {drafts.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
+          <div className="h-12 w-12 rounded-full bg-white/5 flex items-center justify-center">
+            <Save className="h-5 w-5 text-slate-500" />
+          </div>
+          <p className="text-sm text-slate-400">沒有待儲存的記錄</p>
+          <Button
+            variant="ghost"
+            className="text-slate-400 hover:text-white text-sm"
+            onClick={() => onGoToStep("quick-add")}
+          >
+            返回新增記錄
+          </Button>
+        </div>
+      )}
+
+      {/* ── Sticky save footer ── */}
+      {drafts.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 px-3 pb-6 pt-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pointer-events-none">
+          <div className="pointer-events-auto max-w-2xl mx-auto">
+            <Button
+              onClick={onSaveDrafts}
+              className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 active:bg-emerald-600 min-h-[52px] text-base font-semibold rounded-2xl shadow-xl shadow-emerald-500/20 transition-all duration-150"
+              disabled={drafts.length === 0}
+            >
+              <Save className="mr-2 h-4 w-4" />
+              確認儲存 {drafts.length} 筆記錄
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
