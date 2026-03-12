@@ -4,6 +4,14 @@ import { useState } from "react"
 import { ArrowLeft, ArrowRight, Save, Trash2, Pencil, Check, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { CategorySelect } from "@/app/_components/CategorySelect"
@@ -55,6 +63,7 @@ export function ConfirmView({
   onSaveDrafts,
 }: ConfirmViewProps) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const totalIncome = drafts
     .filter(d => d.direction === "income")
@@ -180,7 +189,7 @@ export function ConfirmView({
                       <Button
                         type="button"
                         size="sm"
-                        className="h-7 px-3 text-[11px] bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 border border-indigo-500/30 gap-1"
+                        className="h-7 px-3 text-[11px] bg-white text-slate-900 hover:bg-white/90 border border-white/80 gap-1 font-semibold"
                         onClick={() => setEditingIndex(null)}
                       >
                         <Check className="h-3 w-3" />
@@ -353,7 +362,7 @@ export function ConfirmView({
                   {/* Main info */}
                   <div className="flex-1 min-w-0 space-y-1">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-sm font-semibold text-slate-100 truncate">
+                      <span className="inline-block rounded-md bg-white/90 px-2 py-0.5 text-xs font-semibold text-slate-900 truncate max-w-[160px]">
                         {category?.display_name_zh ?? draft.category_key}
                       </span>
                       {needsAttention && (
@@ -452,10 +461,10 @@ export function ConfirmView({
 
       {/* ── Sticky save footer ── */}
       {drafts.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 px-3 pb-6 pt-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pointer-events-none">
+        <div className="fixed bottom-0 left-0 right-0 z-40 px-3 pb-6 pt-4 pointer-events-none">
           <div className="pointer-events-auto max-w-2xl mx-auto">
             <Button
-              onClick={onSaveDrafts}
+              onClick={() => setConfirmOpen(true)}
               className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 active:bg-emerald-600 min-h-[52px] text-base font-semibold rounded-2xl shadow-xl shadow-emerald-500/20 transition-all duration-150"
               disabled={drafts.length === 0}
             >
@@ -465,6 +474,74 @@ export function ConfirmView({
           </div>
         </div>
       )}
+
+      {/* ── Save confirmation dialog ── */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="bg-slate-900 border-white/15 text-white max-w-sm rounded-2xl">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-semibold text-white">
+              確認儲存 {drafts.length} 筆記錄？
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 text-left">
+                {/* Summary */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  {totalIncome > 0 && (
+                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-widest">收入</p>
+                      <p className="mt-0.5 text-base font-bold text-emerald-300 tabular-nums">
+                        +{formatMoney(totalIncome)}
+                      </p>
+                    </div>
+                  )}
+                  {totalExpense > 0 && (
+                    <div className={`rounded-xl bg-rose-500/10 border border-rose-500/20 px-3 py-2.5 ${totalIncome === 0 ? "col-span-2" : ""}`}>
+                      <p className="text-[10px] font-semibold text-rose-400 uppercase tracking-widest">支出</p>
+                      <p className="mt-0.5 text-base font-bold text-rose-300 tabular-nums">
+                        -{formatMoney(totalExpense)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Warnings */}
+                {warningCount > 0 && (
+                  <div className="flex items-start gap-2 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2.5">
+                    <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-300">
+                      仍有 <span className="font-semibold">{warningCount}</span> 筆類別未確認，儲存後仍可在記錄中修改。
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-xs text-slate-400">
+                  儲存後將寫入記帳記錄，如需修改可從主頁的記錄清單中找到並編輯。
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex-row gap-2 mt-1">
+            <Button
+              variant="ghost"
+              className="flex-1 border border-white/15 text-slate-300 hover:text-white hover:bg-white/10"
+              onClick={() => setConfirmOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              className="flex-1 bg-emerald-500 text-slate-950 hover:bg-emerald-400 font-semibold"
+              onClick={() => {
+                setConfirmOpen(false)
+                onSaveDrafts()
+              }}
+            >
+              <Save className="mr-1.5 h-3.5 w-3.5" />
+              確認儲存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
