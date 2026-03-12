@@ -7,7 +7,6 @@ import {
   ArrowRight,
   BarChart3,
   CalendarDays,
-  CircleAlert,
   FileUp,
   Mic,
   NotebookPen,
@@ -21,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine } from "recharts"
@@ -708,6 +708,120 @@ const TAXONOMY: TaxonomyCategory[] = [
 ]
 
 const CATEGORY_BY_KEY = new Map(TAXONOMY.map(item => [item.category_key, item]))
+
+const TAXONOMY_GROUPS: { label: string; keys: string[] }[] = [
+  {
+    label: "生意收入",
+    keys: [
+      "business_income_product_sale",
+      "business_income_service",
+      "business_income_revenue_share",
+      "business_income_space_rent",
+      "business_income_secondhand_equipment_sale",
+      "business_income_other_entrepreneurial",
+    ],
+  },
+  {
+    label: "生意支出",
+    keys: [
+      "business_expense_raw_material",
+      "business_expense_packaging",
+      "business_expense_marketing",
+      "business_expense_shipping",
+      "business_expense_hr",
+      "business_expense_rent",
+      "business_expense_utilities",
+      "business_expense_gas",
+      "business_expense_communication",
+      "business_expense_consumables",
+      "business_expense_equipment_purchase",
+      "business_expense_equipment_repair",
+      "business_expense_fixed_other",
+      "business_expense_variable_other",
+      "business_expense_repayment",
+      "business_expense_extra_other",
+    ],
+  },
+  {
+    label: "生活收入",
+    keys: [
+      "life_income_salary",
+      "life_income_side_hustle",
+      "life_income_temp_work",
+      "life_income_gov_subsidy",
+      "life_income_family_gift",
+      "life_income_pension",
+      "life_income_rent",
+      "life_income_interest",
+      "life_income_investment",
+      "life_income_savings",
+      "life_income_other",
+    ],
+  },
+  {
+    label: "生活支出",
+    keys: [
+      "life_expense_food",
+      "life_expense_housing",
+      "life_expense_transport",
+      "life_expense_clothing",
+      "life_expense_education",
+      "life_expense_fun",
+      "life_expense_medical",
+      "life_expense_insurance",
+      "life_expense_telecom",
+      "life_expense_repayment",
+      "life_expense_other",
+    ],
+  },
+]
+
+function CategorySelect({
+  value,
+  onValueChange,
+  className,
+}: {
+  value: string
+  onValueChange: (key: string) => void
+  className?: string
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger
+        className={
+          className ??
+          "w-full rounded-md border border-white/20 bg-slate-950/80 px-3 py-2.5 text-sm text-white min-h-[44px] focus:ring-indigo-400"
+        }
+      >
+        <SelectValue placeholder="選擇類別" />
+      </SelectTrigger>
+      <SelectContent className="bg-slate-900 border-white/20 text-white max-h-72">
+        {TAXONOMY_GROUPS.map(group => (
+          <SelectGroup key={group.label}>
+            <SelectLabel className="text-slate-400 text-xs py-1.5 px-2">
+              {group.label}
+            </SelectLabel>
+            {group.keys.map(key => {
+              const category = CATEGORY_BY_KEY.get(key)
+              if (!category) return null
+              const fullLabel = `${group.label}-${category.display_name_zh}`
+              return (
+                <SelectItem
+                  key={key}
+                  value={key}
+                  textValue={fullLabel}
+                  className="text-white focus:bg-white/10 focus:text-white pl-4"
+                >
+                  {category.display_name_zh}
+                </SelectItem>
+              )
+            })}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
 const CURRENCY = new Intl.NumberFormat("zh-TW", { style: "currency", currency: "TWD", maximumFractionDigits: 0 })
 
 const DEFAULT_MAPPING: FileMapping = {
@@ -3632,19 +3746,12 @@ export default function MvpAccountingPage() {
                         </div>
                       </div>
 
-                      <select
+                      <CategorySelect
                         value={editDraft.category_key}
-                        onChange={event =>
-                          setEditDraft(previous => (previous ? { ...previous, category_key: event.target.value } : previous))
+                        onValueChange={key =>
+                          setEditDraft(previous => (previous ? { ...previous, category_key: key } : previous))
                         }
-                        className="w-full rounded-md border border-white/20 bg-slate-950/80 px-2 py-2.5 text-sm text-white min-h-[44px]"
-                      >
-                        {TAXONOMY.map(category => (
-                          <option key={category.category_key} value={category.category_key}>
-                            {categoryLabel(category.category_key)}
-                          </option>
-                        ))}
-                      </select>
+                      />
 
                       <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         <Button
@@ -4669,13 +4776,10 @@ export default function MvpAccountingPage() {
 
         <div className="space-y-3">
           {drafts.map((draft, index) => {
-            const lowConfidence = draft.ai_confidence < 0.65
             return (
               <Card
                 key={draft.id}
-                className={`bg-slate-900/70 ${
-                  lowConfidence ? "border-amber-300/40" : "border-white/15"
-                }`}
+                className="bg-slate-900/70 border-white/15"
               >
                 <CardContent className="pt-4 sm:pt-6 space-y-3">
                   <div className="flex items-start gap-2">
@@ -4753,11 +4857,9 @@ export default function MvpAccountingPage() {
                             <span className="ml-1.5 text-amber-400">← 請確認或選擇類別</span>
                           )}
                         </p>
-                        <select
-                          data-draft-category={index}
+                        <CategorySelect
                           value={draft.category_key}
-                          onChange={event => {
-                            const key = event.target.value
+                          onValueChange={key => {
                             const category = CATEGORY_BY_KEY.get(key)
                             if (!category) return
                             updateDraft(index, item => ({
@@ -4769,18 +4871,12 @@ export default function MvpAccountingPage() {
                               categoryTouched: true,
                             }))
                           }}
-                          className={`w-full rounded-md border bg-slate-950/80 px-2 py-2.5 text-sm text-white min-h-[44px] ${
+                          className={`w-full rounded-md border bg-slate-950/80 px-3 py-2.5 text-sm text-white min-h-[44px] focus:ring-indigo-400 ${
                             draft.category_key.includes("other") && !draft.categoryTouched
                               ? "border-amber-400/60 ring-1 ring-amber-400/30"
                               : "border-white/20"
                           }`}
-                        >
-                          {TAXONOMY.map(category => (
-                            <option key={category.category_key} value={category.category_key}>
-                              {categoryLabel(category.category_key)}
-                            </option>
-                          ))}
-                        </select>
+                        />
                       </div>
                     </div>
                     <Button
@@ -4795,9 +4891,6 @@ export default function MvpAccountingPage() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                    <Badge variant="outline" className={`text-[10px] sm:text-[11px] ${confidenceTone(draft.ai_confidence)}`}>
-                      可信度 {Math.round(draft.ai_confidence * 100)}%
-                    </Badge>
                     <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
                       {domainLabel(draft.domain)}／{directionLabel(draft.direction)}
                     </Badge>
@@ -4805,13 +4898,6 @@ export default function MvpAccountingPage() {
                       {modeLabel(draft.input_mode)}
                     </Badge>
                   </div>
-
-                  {lowConfidence && (
-                    <div className="rounded-md border border-amber-300/30 bg-amber-500/10 p-2 text-xs text-amber-100 flex items-start gap-2">
-                      <CircleAlert className="h-4 w-4 shrink-0 mt-0.5" />
-                      AI 置信度偏低，請在上方下拉選單中確認或修正類別後再儲存。
-                    </div>
-                  )}
 
                   {draft.parse_error && (
                     <div className="rounded-md border border-rose-300/30 bg-rose-500/10 p-2 text-xs text-rose-100">
