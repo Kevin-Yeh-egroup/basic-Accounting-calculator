@@ -15,8 +15,8 @@ export const MODE_OPTIONS: Array<{
   },
   {
     mode: "file_import",
-    title: "上傳檔案",
-    description: "照片、Excel、PDF 等檔案會先整理成草稿，再讓你確認",
+    title: "上傳帳單、發票或檔案",
+    description: "帳單、發票照片、Excel、PDF 等檔案會先整理成草稿，再讓你確認",
     icon: FileUp,
   },
 ]

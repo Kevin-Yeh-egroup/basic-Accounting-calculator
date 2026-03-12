@@ -1931,7 +1931,16 @@ export function MvpAccountingPage({ initialStep = "home" }: MvpAccountingPagePro
                       <Icon className="h-5 w-5 text-indigo-200" />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-white">{option.title}</p>
+                      <p className="text-sm font-medium text-white">
+                        {option.mode === "file_import" ? (
+                          <>
+                            <span className="sm:hidden">上傳檔案</span>
+                            <span className="hidden sm:inline">{option.title}</span>
+                          </>
+                        ) : (
+                          option.title
+                        )}
+                      </p>
                       <p className="text-xs text-slate-300 mt-0.5">{option.description}</p>
                     </div>
                     <ArrowRight className="h-4 w-4 text-slate-500 shrink-0" />

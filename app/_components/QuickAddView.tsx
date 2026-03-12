@@ -105,11 +105,18 @@ export function QuickAddView({
       <Card className="border-white/20 bg-slate-900/70">
         <CardHeader className="pb-3">
           <CardTitle className="text-white text-base sm:text-lg">
-            {isFileMode ? "上傳檔案" : "輸入一筆收支"}
+            {isFileMode ? (
+              <>
+                <span className="sm:hidden">上傳檔案</span>
+                <span className="hidden sm:inline">上傳帳單、發票或檔案</span>
+              </>
+            ) : (
+              "輸入一筆收支"
+            )}
           </CardTitle>
           <CardDescription className="text-slate-300 text-xs sm:text-sm">
             {isFileMode
-              ? "照片、Excel、PDF 等檔案都能先整理成草稿，再確認後匯入。"
+              ? "帳單、發票照片、Excel、PDF 等檔案都能先整理成草稿，再確認後匯入。"
               : "一句話、語音或貼上多筆都可以，系統會自動判斷收支、日期與類別。"}
           </CardDescription>
         </CardHeader>
@@ -152,7 +159,8 @@ export function QuickAddView({
                   onClick={() => onSwitchQuickAddMode("file_import")}
                 >
                   <FileUp className="h-4 w-4 shrink-0" />
-                  <span className="truncate">上傳檔案</span>
+                  <span className="truncate sm:hidden">上傳檔案</span>
+                  <span className="hidden truncate sm:inline">上傳帳單/發票/檔案</span>
                 </Button>
               </div>
               {isListening && (
