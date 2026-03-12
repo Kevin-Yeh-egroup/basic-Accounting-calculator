@@ -33,6 +33,15 @@ type InputMode = "text_single" | "voice_single" | "photo_single" | "bulk_text" |
 type UploadKind = "none" | "image" | "document"
 type OverviewDirectionFilter = "all" | "income" | "expense"
 type ImportJobStatus = "uploaded" | "parsed" | "mapped" | "ready_to_import" | "imported" | "failed"
+type PaymentMethod =
+  | "cash"
+  | "credit_card"
+  | "debit_card"
+  | "bank_transfer"
+  | "line_pay"
+  | "other_e_wallet"
+  | "other"
+  | "unspecified"
 type PageStep =
   | "home"
   | "quick-add"
@@ -78,6 +87,7 @@ interface Transaction {
   category_key: string
   note: string
   input_mode: InputMode
+  payment_method?: PaymentMethod
   source_file_id?: string
   ai_predicted_category_key: string
   ai_confidence: number
@@ -118,6 +128,7 @@ interface TransactionEditDraft {
   amount: string
   category_key: string
   note: string
+  payment_method: PaymentMethod
 }
 
 interface AiFinanceFeedbackCard {
@@ -862,6 +873,58 @@ function CategorySelect({
     </Select>
   )
 }
+
+const PAYMENT_METHOD_OPTIONS: Array<{ value: PaymentMethod; label: string }> = [
+  { value: "cash", label: "現金" },
+  { value: "credit_card", label: "信用卡" },
+  { value: "debit_card", label: "簽帳金融卡" },
+  { value: "bank_transfer", label: "轉帳 / 匯款" },
+  { value: "line_pay", label: "LINE Pay" },
+  { value: "other_e_wallet", label: "其他電子支付" },
+  { value: "other", label: "其他" },
+  { value: "unspecified", label: "未指定" },
+]
+
+function PaymentMethodSelect({
+  value,
+  onValueChange,
+  direction,
+  className,
+}: {
+  value: PaymentMethod
+  onValueChange: (method: PaymentMethod) => void
+  direction: Exclude<Direction, "unknown">
+  className?: string
+}) {
+  const selectedLabel = paymentMethodLabel(value)
+  const fieldLabel = paymentMethodFieldLabel(direction)
+
+  return (
+    <Select value={value} onValueChange={next => onValueChange(normalizePaymentMethod(next))}>
+      <SelectTrigger
+        className={
+          className ??
+          "w-full rounded-md border border-white/20 bg-slate-950/80 px-3 py-2.5 text-sm text-white min-h-[44px] focus:ring-indigo-400"
+        }
+      >
+        <SelectValue placeholder={`選擇${fieldLabel}`}>{selectedLabel}</SelectValue>
+      </SelectTrigger>
+      <SelectContent className="bg-slate-900 border-white/20 text-white max-h-72">
+        {PAYMENT_METHOD_OPTIONS.map(option => (
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            textValue={option.label}
+            className="text-white focus:bg-white/10 focus:text-white"
+          >
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 const CURRENCY = new Intl.NumberFormat("zh-TW", { style: "currency", currency: "TWD", maximumFractionDigits: 0 })
 
 const DEFAULT_MAPPING: FileMapping = {
@@ -897,6 +960,7 @@ const DEMO_TRANSACTIONS: Transaction[] = [
     category_key: "business_income_product_sale",
     note: "今日賣貨 3200",
     input_mode: "text_single",
+    payment_method: "line_pay",
     ai_predicted_category_key: "business_income_product_sale",
     ai_confidence: 0.89,
     user_overridden: false,
@@ -911,6 +975,7 @@ const DEMO_TRANSACTIONS: Transaction[] = [
     category_key: "business_expense_raw_material",
     note: "買材料 900",
     input_mode: "text_single",
+    payment_method: "bank_transfer",
     ai_predicted_category_key: "business_expense_raw_material",
     ai_confidence: 0.86,
     user_overridden: false,
@@ -925,6 +990,7 @@ const DEMO_TRANSACTIONS: Transaction[] = [
     category_key: "life_expense_food",
     note: "晚餐 120",
     input_mode: "text_single",
+    payment_method: "cash",
     ai_predicted_category_key: "life_expense_food",
     ai_confidence: 0.8,
     user_overridden: false,
@@ -1341,6 +1407,21 @@ function inferDomain(text: string): Domain {
   return "unknown"
 }
 
+function inferPaymentMethod(text: string): PaymentMethod {
+  const normalized = text.toLowerCase().replace(/\s+/g, "")
+  if (["linepay", "line_pay"].some(keyword => normalized.includes(keyword))) return "line_pay"
+  if (["信用卡", "刷卡", "visa", "mastercard", "amex"].some(keyword => normalized.includes(keyword))) {
+    return "credit_card"
+  }
+  if (["簽帳卡", "金融卡", "debit"].some(keyword => normalized.includes(keyword))) return "debit_card"
+  if (["現金", "cash"].some(keyword => normalized.includes(keyword))) return "cash"
+  if (["轉帳", "匯款", "banktransfer", "atm"].some(keyword => normalized.includes(keyword))) return "bank_transfer"
+  if (["街口", "applepay", "googlepay", "電子支付", "行動支付", "ewallet", "錢包"].some(keyword => normalized.includes(keyword))) {
+    return "other_e_wallet"
+  }
+  return "unspecified"
+}
+
 function resolveFallbackCategory(domain: Domain, direction: Direction): TaxonomyCategory {
   const safeDomain: Exclude<Domain, "unknown"> = domain === "business" ? "business" : "life"
   const safeDirection: Exclude<Direction, "unknown"> = direction === "income" ? "income" : "expense"
@@ -1417,6 +1498,7 @@ function buildDraftTransaction(line: string, inputMode: InputMode, sourceFileId?
   const amount = extractAmountFromText(line)
   const classification = classifyLine(line, amount)
   const category = CATEGORY_BY_KEY.get(classification.category_key) ?? resolveFallbackCategory("life", "expense")
+  const paymentMethod = inferPaymentMethod(line)
 
   return {
     id: uid("draft"),
@@ -1428,6 +1510,7 @@ function buildDraftTransaction(line: string, inputMode: InputMode, sourceFileId?
     category_key: category.category_key,
     note: line.trim(),
     input_mode: inputMode,
+    payment_method: paymentMethod,
     source_file_id: sourceFileId,
     ai_predicted_category_key: category.category_key,
     ai_confidence: classification.confidence,
@@ -1569,6 +1652,46 @@ function directionLabel(direction: Direction): string {
   if (direction === "income") return "收入"
   if (direction === "expense") return "支出"
   return "未判定"
+}
+
+function normalizePaymentMethod(value: string | null | undefined): PaymentMethod {
+  if (!value) return "unspecified"
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_")
+  if (normalized === "linepay") return "line_pay"
+
+  const validMethods = new Set<PaymentMethod>([
+    "cash",
+    "credit_card",
+    "debit_card",
+    "bank_transfer",
+    "line_pay",
+    "other_e_wallet",
+    "other",
+    "unspecified",
+  ])
+  if (validMethods.has(normalized as PaymentMethod)) {
+    return normalized as PaymentMethod
+  }
+  return "unspecified"
+}
+
+function paymentMethodFieldLabel(direction: Direction): string {
+  return direction === "income" ? "入帳方式" : "付款方式"
+}
+
+function paymentMethodLabel(method: string | null | undefined): string {
+  const normalized = normalizePaymentMethod(method)
+  const methodMap: Record<PaymentMethod, string> = {
+    cash: "現金",
+    credit_card: "信用卡",
+    debit_card: "簽帳金融卡",
+    bank_transfer: "轉帳 / 匯款",
+    line_pay: "LINE Pay",
+    other_e_wallet: "其他電子支付",
+    other: "其他",
+    unspecified: "未指定",
+  }
+  return methodMap[normalized]
 }
 
 function importStatusLabel(status: ImportJobStatus): string {
@@ -1895,10 +2018,18 @@ function toTransaction(item: DraftTransaction): Transaction {
     category_key: item.category_key,
     note: item.note,
     input_mode: item.input_mode,
+    payment_method: normalizePaymentMethod(item.payment_method),
     source_file_id: item.source_file_id,
     ai_predicted_category_key: item.ai_predicted_category_key,
     ai_confidence: item.ai_confidence,
     user_overridden: item.user_overridden,
+  }
+}
+
+function normalizeTransaction(item: Transaction): Transaction {
+  return {
+    ...item,
+    payment_method: normalizePaymentMethod(item.payment_method),
   }
 }
 
@@ -1917,7 +2048,7 @@ export default function MvpAccountingPage() {
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null)
   const [calendarDaySheetOpen, setCalendarDaySheetOpen] = useState(false)
 
-  const [transactions, setTransactions] = useState<Transaction[]>(DEMO_TRANSACTIONS)
+  const [transactions, setTransactions] = useState<Transaction[]>(() => DEMO_TRANSACTIONS.map(normalizeTransaction))
   const [drafts, setDrafts] = useState<DraftTransaction[]>([])
   const [importJob, setImportJob] = useState<ImportJob | null>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
@@ -1946,6 +2077,7 @@ export default function MvpAccountingPage() {
   const [entryDirection, setEntryDirection] = useState<Exclude<Direction, "unknown">>("expense")
   const [entryDomain, setEntryDomain] = useState<Exclude<Domain, "unknown">>("life")
   const [entryCategory, setEntryCategory] = useState("")
+  const [entryPaymentMethod, setEntryPaymentMethod] = useState<PaymentMethod>("cash")
   const [entryCalcDisplay, setEntryCalcDisplay] = useState("0")
   const [entryNote, setEntryNote] = useState("")
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10))
@@ -2015,14 +2147,15 @@ export default function MvpAccountingPage() {
         if (cancelled) return
 
         if (Array.isArray(storedTransactions) && storedTransactions.length > 0) {
-          setTransactions(storedTransactions)
+          setTransactions(storedTransactions.map(normalizeTransaction))
         } else {
           const legacyTransactionsRaw = localStorage.getItem(LEGACY_STORAGE_TX_KEY)
           if (legacyTransactionsRaw) {
             const legacyTransactions = JSON.parse(legacyTransactionsRaw) as Transaction[]
             if (Array.isArray(legacyTransactions) && legacyTransactions.length > 0) {
-              setTransactions(legacyTransactions)
-              await writeIndexedDbValue(INDEXED_DB_TX_KEY, legacyTransactions)
+              const normalizedLegacyTransactions = legacyTransactions.map(normalizeTransaction)
+              setTransactions(normalizedLegacyTransactions)
+              await writeIndexedDbValue(INDEXED_DB_TX_KEY, normalizedLegacyTransactions)
             }
           }
         }
@@ -2148,6 +2281,7 @@ export default function MvpAccountingPage() {
               category_key: category.category_key,
               note: entry.note.trim() || `${entry.title}（固定收支）`,
               input_mode: "text_single",
+              payment_method: "unspecified",
               ai_predicted_category_key: category.category_key,
               ai_confidence: 1,
               user_overridden: false,
@@ -2480,6 +2614,7 @@ export default function MvpAccountingPage() {
         item.note,
         item.occurred_at,
         categoryLabel(item.category_key),
+        paymentMethodLabel(item.payment_method),
         modeLabel(item.input_mode),
       ]
         .join(" ")
@@ -2589,6 +2724,7 @@ export default function MvpAccountingPage() {
     setEntryEditingId(null)
     setEntryDirection("expense")
     setEntryCategory("")
+    setEntryPaymentMethod("cash")
     setEntryCategoryNeedsAttention(false)
     setEntryCalcDisplay("0")
     setEntryNote("")
@@ -2612,6 +2748,7 @@ export default function MvpAccountingPage() {
     setEntryDirection("expense")
     setEntryDomain("life")
     setEntryCategory("")
+    setEntryPaymentMethod("cash")
     setEntryCategoryNeedsAttention(false)
     setEntryCalcDisplay("0")
     setEntryNote("")
@@ -2765,6 +2902,10 @@ export default function MvpAccountingPage() {
       const dayOffset = Math.floor(Math.random() * 28)
       const d = new Date(y, m, today.getDate() - dayOffset)
       const dateStr = d.toISOString().slice(0, 10)
+      const paymentPool: PaymentMethod[] = isIncome
+        ? ["cash", "bank_transfer", "line_pay", "other_e_wallet"]
+        : ["cash", "credit_card", "debit_card", "line_pay", "other_e_wallet", "bank_transfer"]
+      const paymentMethod = paymentPool[Math.floor(Math.random() * paymentPool.length)] ?? "unspecified"
 
       return {
         id: uid("draft"),
@@ -2776,6 +2917,7 @@ export default function MvpAccountingPage() {
         category_key: cat.category_key,
         note,
         input_mode: "file_import" as InputMode,
+        payment_method: paymentMethod,
         ai_predicted_category_key: cat.category_key,
         ai_confidence: +(Math.random() * 0.35 + 0.6).toFixed(2),
         user_overridden: false,
@@ -2916,6 +3058,7 @@ export default function MvpAccountingPage() {
         domain: safeDomain,
         direction: safeDirection,
         category_key: category.category_key,
+        payment_method: normalizePaymentMethod(item.payment_method),
         user_overridden: item.user_overridden || item.ai_predicted_category_key !== category.category_key,
       }
     })
@@ -2943,6 +3086,7 @@ export default function MvpAccountingPage() {
       amount: String(item.amount),
       category_key: item.category_key,
       note: item.note,
+      payment_method: normalizePaymentMethod(item.payment_method),
     })
   }
 
@@ -2977,6 +3121,7 @@ export default function MvpAccountingPage() {
           domain: nextCategory.domain,
           direction: nextCategory.direction,
           note: editDraft.note.trim() || item.note,
+          payment_method: normalizePaymentMethod(editDraft.payment_method),
           user_overridden: item.user_overridden || item.ai_predicted_category_key !== nextCategory.category_key,
         }
       })
@@ -3207,6 +3352,7 @@ export default function MvpAccountingPage() {
         category_key: category.category_key,
         note: rule.note.trim() || `${rule.title}（固定收支）`,
         input_mode: "text_single",
+        payment_method: "unspecified",
         ai_predicted_category_key: category.category_key,
         ai_confidence: 1,
         user_overridden: false,
@@ -3608,7 +3754,7 @@ export default function MvpAccountingPage() {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-white truncate">{item.note}</p>
                           <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">
-                            {categoryLabel(item.category_key)}
+                            {categoryLabel(item.category_key)} ・ {paymentMethodLabel(item.payment_method)}
                           </p>
                         </div>
                         <p className={`text-sm font-semibold shrink-0 ${item.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
@@ -3695,7 +3841,7 @@ export default function MvpAccountingPage() {
               value={overviewQuery}
               onChange={event => setOverviewQuery(event.target.value)}
               className="bg-slate-950/60 border-white/20 text-white min-h-[44px]"
-              placeholder="搜尋關鍵字（日期、備註、類別）"
+              placeholder="搜尋關鍵字（日期、備註、類別、付款方式）"
             />
             <p className="text-xs text-slate-400">目前顯示 {overviewTransactions.length} 筆</p>
           </CardContent>
@@ -3724,6 +3870,9 @@ export default function MvpAccountingPage() {
                             <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
                               {categoryLabel(item.category_key)}
                             </Badge>
+                            <span className="text-[10px] sm:text-[11px] text-slate-400">
+                              {paymentMethodFieldLabel(item.direction)}：{paymentMethodLabel(item.payment_method)}
+                            </span>
                             <span className="text-[10px] sm:text-[11px] text-slate-400">{item.occurred_at}</span>
                             <span className="text-[10px] sm:text-[11px] text-slate-400">{modeLabel(item.input_mode)}</span>
                           </div>
@@ -3794,6 +3943,16 @@ export default function MvpAccountingPage() {
                           setEditDraft(previous => (previous ? { ...previous, category_key: key } : previous))
                         }
                       />
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-slate-500 px-0.5">{paymentMethodFieldLabel(item.direction)}</p>
+                        <PaymentMethodSelect
+                          value={editDraft.payment_method}
+                          direction={item.direction === "income" ? "income" : "expense"}
+                          onValueChange={method =>
+                            setEditDraft(previous => (previous ? { ...previous, payment_method: method } : previous))
+                          }
+                        />
+                      </div>
 
                       <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         <Button
@@ -3968,6 +4127,7 @@ export default function MvpAccountingPage() {
     setEntryDirection(dir)
     setEntryDomain(dom)
     setEntryCategory(tx.category_key)
+    setEntryPaymentMethod(normalizePaymentMethod(tx.payment_method))
     setEntryCategoryNeedsAttention(false)
     setEntryCalcDisplay(String(tx.amount))
     setEntryNote(tx.note)
@@ -4023,6 +4183,7 @@ export default function MvpAccountingPage() {
             domain: category.domain,
             category_key: category.category_key,
             note: entryNote.trim() || category.display_name_zh,
+            payment_method: normalizePaymentMethod(entryPaymentMethod),
             user_overridden: t.ai_predicted_category_key !== category.category_key,
           }
         })
@@ -4039,6 +4200,7 @@ export default function MvpAccountingPage() {
         category_key: category.category_key,
         note: entryNote.trim() || category.display_name_zh,
         input_mode: "text_single",
+        payment_method: normalizePaymentMethod(entryPaymentMethod),
         ai_predicted_category_key: category.category_key,
         ai_confidence: 1,
         user_overridden: false,
@@ -4051,6 +4213,7 @@ export default function MvpAccountingPage() {
     setEntryCalcDisplay("0")
     setEntryNote("")
     setEntryCategory("")
+    setEntryPaymentMethod("cash")
     setEntryCategoryNeedsAttention(false)
     setEntryDate(new Date().toISOString().slice(0, 10))
     setStep("home")
@@ -4123,6 +4286,15 @@ export default function MvpAccountingPage() {
             className="bg-slate-950/60 border-white/20 text-white text-sm min-h-[40px]"
             placeholder="輸入備註"
           />
+          <div className="space-y-1">
+            <p className="text-[10px] text-slate-500 px-0.5">{paymentMethodFieldLabel(entryDirection)}</p>
+            <PaymentMethodSelect
+              value={entryPaymentMethod}
+              direction={entryDirection}
+              onValueChange={method => setEntryPaymentMethod(method)}
+              className="w-full rounded-md border border-white/20 bg-slate-950/60 px-3 py-2 text-sm text-white min-h-[40px] focus:ring-indigo-400"
+            />
+          </div>
           <div className="flex items-center gap-2">
             {entryCategory ? (
               <Badge variant="outline" className="border-white/20 text-slate-200 text-[10px]">
@@ -4742,6 +4914,23 @@ export default function MvpAccountingPage() {
                                   </option>
                                 ))}
                               </select>
+                              <div className="space-y-0.5">
+                                <p className="text-[9px] text-slate-500">
+                                  {paymentMethodFieldLabel(draft.direction)}
+                                </p>
+                                <PaymentMethodSelect
+                                  value={normalizePaymentMethod(draft.payment_method)}
+                                  direction={draft.direction === "income" ? "income" : "expense"}
+                                  onValueChange={method =>
+                                    updateDraft(index, item => ({
+                                      ...item,
+                                      payment_method: method,
+                                      user_overridden: true,
+                                    }))
+                                  }
+                                  className="w-full rounded-md border border-white/10 bg-slate-950/50 px-2 py-1.5 text-xs text-white min-h-[32px]"
+                                />
+                              </div>
                             </div>
                           )
                         })}
@@ -4928,6 +5117,20 @@ export default function MvpAccountingPage() {
                               ? "border-amber-400/60 ring-1 ring-amber-400/30"
                               : "border-white/20"
                           }`}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-slate-500 px-0.5">{paymentMethodFieldLabel(draft.direction)}</p>
+                        <PaymentMethodSelect
+                          value={normalizePaymentMethod(draft.payment_method)}
+                          direction={draft.direction === "income" ? "income" : "expense"}
+                          onValueChange={method =>
+                            updateDraft(index, item => ({
+                              ...item,
+                              payment_method: method,
+                              user_overridden: true,
+                            }))
+                          }
                         />
                       </div>
                     </div>
@@ -5559,7 +5762,9 @@ export default function MvpAccountingPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-white truncate">{item.note}</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5">{categoryLabel(item.category_key)}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            {categoryLabel(item.category_key)} ・ {paymentMethodLabel(item.payment_method)}
+                          </p>
                         </div>
                         <p className={`text-sm font-semibold shrink-0 ${item.direction === "expense" ? "text-rose-300" : "text-emerald-300"}`}>
                           {item.direction === "expense" ? "-" : "+"}
@@ -5611,17 +5816,17 @@ export default function MvpAccountingPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-3 gap-2">
-            <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-center">
-              <p className="text-[10px] text-slate-400">可執行</p>
-              <p className="text-sm font-semibold text-white">{recurringSummary.active_with_remaining}</p>
+            <div className="rounded-lg border border-white/10 bg-white/5 px-2 py-3 text-center">
+              <p className="text-xs font-semibold text-slate-300 mb-0.5">可執行</p>
+              <p className="text-2xl font-bold text-white">{recurringSummary.active_with_remaining}</p>
             </div>
-            <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-2 py-2 text-center">
-              <p className="text-[10px] text-emerald-200/80">自動記帳</p>
-              <p className="text-sm font-semibold text-emerald-100">{recurringSummary.auto}</p>
+            <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 px-2 py-3 text-center">
+              <p className="text-xs font-semibold text-emerald-300 mb-0.5">自動記帳</p>
+              <p className="text-2xl font-bold text-emerald-200">{recurringSummary.auto}</p>
             </div>
-            <div className="rounded-lg border border-amber-300/25 bg-amber-500/10 px-2 py-2 text-center">
-              <p className="text-[10px] text-amber-200/80">今日到期</p>
-              <p className="text-sm font-semibold text-amber-100">{recurringSummary.dueToday}</p>
+            <div className="rounded-lg border border-amber-300/35 bg-amber-500/10 px-2 py-3 text-center">
+              <p className="text-xs font-semibold text-amber-300 mb-0.5">今日到期</p>
+              <p className="text-2xl font-bold text-amber-200">{recurringSummary.dueToday}</p>
             </div>
           </CardContent>
         </Card>
@@ -6123,15 +6328,18 @@ export default function MvpAccountingPage() {
       </main>
 
       {step === "home" && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pb-6 safe-bottom">
-          <Button
-            size="lg"
-            className="h-14 w-14 rounded-full bg-[linear-gradient(135deg,#f2b08c_0%,#ea8da0_100%)] text-[#fffaf8] shadow-lg shadow-[#ecc8ba]/70 hover:opacity-95 active:scale-95 transition-transform"
-            onClick={() => startSmartEntry()}
-            aria-label="輸入一筆收支"
-          >
-            <Plus className="h-6 w-6" />
-          </Button>
+        <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pb-8 safe-bottom">
+          <div className="flex flex-col items-center gap-2">
+            <Button
+              size="lg"
+              className="h-14 px-8 rounded-full bg-[linear-gradient(135deg,#f2b08c_0%,#ea8da0_100%)] text-[#fffaf8] shadow-2xl shadow-[#ecc8ba]/80 hover:opacity-95 hover:shadow-[#ecc8ba]/90 active:scale-95 transition-all duration-200 gap-2.5"
+              onClick={() => startSmartEntry()}
+              aria-label="新增記帳"
+            >
+              <Plus className="h-5 w-5 stroke-[2.5]" />
+              <span className="text-[15px] font-semibold tracking-wide">記一筆</span>
+            </Button>
+          </div>
         </div>
       )}
 
@@ -6193,6 +6401,9 @@ export default function MvpAccountingPage() {
                           <Badge variant="outline" className="text-[10px] sm:text-[11px] border-white/20 text-slate-200">
                             {categoryLabel(item.category_key)}
                           </Badge>
+                          <span className="text-[10px] sm:text-[11px] text-slate-400">
+                            {paymentMethodFieldLabel(item.direction)}：{paymentMethodLabel(item.payment_method)}
+                          </span>
                           <span className="text-[10px] sm:text-[11px] text-slate-400">{modeLabel(item.input_mode)}</span>
                         </div>
                       </div>
