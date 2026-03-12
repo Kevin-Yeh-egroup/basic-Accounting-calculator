@@ -36,7 +36,7 @@ interface ConfirmViewProps {
   readonly onUpdateDraft: (index: number, updater: (d: DraftTransaction) => DraftTransaction) => void
   readonly onShiftDraftDate: (index: number, days: number) => void
   readonly onDraftsChange: (updater: DraftTransaction[] | ((prev: DraftTransaction[]) => DraftTransaction[])) => void
-  readonly onSaveDrafts: () => void
+  readonly onSaveDrafts: (options?: { allowIncomplete?: boolean }) => void
 }
 
 function formatDisplayDate(ymd: string): string {
@@ -64,6 +64,7 @@ export function ConfirmView({
 }: ConfirmViewProps) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [deleteTargetIndex, setDeleteTargetIndex] = useState<number | null>(null)
 
   const totalIncome = drafts
     .filter(d => d.direction === "income")
@@ -73,6 +74,22 @@ export function ConfirmView({
     .reduce((sum, d) => sum + d.amount, 0)
 
   const warningCount = drafts.filter(d => d.category_key.includes("other") && !d.categoryTouched).length
+  const parseErrorCount = drafts.filter(d => d.parse_error).length
+  const deleteTarget = deleteTargetIndex === null ? null : drafts[deleteTargetIndex]
+  const deleteTargetCategory = deleteTarget
+    ? (CATEGORY_BY_KEY.get(deleteTarget.category_key)?.display_name_zh ?? deleteTarget.category_key)
+    : ""
+
+  function confirmDeleteDraft() {
+    if (deleteTargetIndex === null) return
+    onDraftsChange(prev => prev.filter((_, i) => i !== deleteTargetIndex))
+    setEditingIndex(prev => {
+      if (prev === null) return null
+      if (prev === deleteTargetIndex) return null
+      return prev > deleteTargetIndex ? prev - 1 : prev
+    })
+    setDeleteTargetIndex(null)
+  }
 
   return (
     <div className="space-y-4">
@@ -178,10 +195,7 @@ export function ConfirmView({
                         size="sm"
                         variant="ghost"
                         className="h-7 px-2.5 text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 gap-1"
-                        onClick={() => {
-                          onDraftsChange(prev => prev.filter((_, i) => i !== index))
-                          setEditingIndex(null)
-                        }}
+                        onClick={() => setDeleteTargetIndex(index)}
                       >
                         <Trash2 className="h-3 w-3" />
                         刪除
@@ -413,7 +427,7 @@ export function ConfirmView({
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7 text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                        onClick={() => onDraftsChange(prev => prev.filter((_, i) => i !== index))}
+                        onClick={() => setDeleteTargetIndex(index)}
                         aria-label="刪除此筆記錄"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -504,7 +518,17 @@ export function ConfirmView({
                   )}
                 </div>
 
-                {/* Warnings */}
+                {/* Parse errors */}
+                {parseErrorCount > 0 && (
+                  <div className="flex items-start gap-2 rounded-xl border border-rose-400/25 bg-rose-500/10 px-3 py-2.5">
+                    <AlertCircle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-rose-300">
+                      有 <span className="font-semibold">{parseErrorCount}</span> 筆金額未能自動解析，請確認金額欄位已正確填寫，或儲存後再手動修改。
+                    </p>
+                  </div>
+                )}
+
+                {/* Category warnings */}
                 {warningCount > 0 && (
                   <div className="flex items-start gap-2 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2.5">
                     <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
@@ -521,23 +545,69 @@ export function ConfirmView({
             </DialogDescription>
           </DialogHeader>
 
+          <DialogFooter className="flex-col gap-2 mt-1">
+            <Button
+              className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 font-semibold min-h-[48px] text-sm"
+              onClick={() => {
+                setConfirmOpen(false)
+                onSaveDrafts({ allowIncomplete: true })
+              }}
+            >
+              <Save className="mr-1.5 h-4 w-4" />
+              儲存完成，回到首頁
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full border border-white/15 text-slate-400 hover:text-white hover:bg-white/10 text-sm"
+              onClick={() => setConfirmOpen(false)}
+            >
+              繼續編輯
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation dialog ── */}
+      <Dialog
+        open={deleteTargetIndex !== null}
+        onOpenChange={open => {
+          if (!open) setDeleteTargetIndex(null)
+        }}
+      >
+        <DialogContent className="bg-slate-900 border-white/15 text-white max-w-sm rounded-2xl">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-semibold text-white">確認刪除這筆明細？</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 text-left">
+                {deleteTarget && (
+                  <div className="rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5">
+                    <p className="text-sm font-medium text-white truncate">{deleteTargetCategory}</p>
+                    <p className="mt-1 text-xs text-slate-400">{deleteTarget.note || "無備註"}</p>
+                    <p className="mt-1.5 text-sm font-semibold text-rose-300">
+                      {(deleteTarget.direction === "income" ? "+" : "-") + formatMoney(deleteTarget.amount)}
+                    </p>
+                  </div>
+                )}
+                <p className="text-xs text-slate-400">
+                  刪除後此筆將從待確認清單移除，你可以回到輸入頁重新解析或手動新增。
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter className="flex-row gap-2 mt-1">
             <Button
               variant="ghost"
               className="flex-1 border border-white/15 text-slate-300 hover:text-white hover:bg-white/10"
-              onClick={() => setConfirmOpen(false)}
+              onClick={() => setDeleteTargetIndex(null)}
             >
               取消
             </Button>
             <Button
-              className="flex-1 bg-emerald-500 text-slate-950 hover:bg-emerald-400 font-semibold"
-              onClick={() => {
-                setConfirmOpen(false)
-                onSaveDrafts()
-              }}
+              className="flex-1 bg-rose-500 text-white hover:bg-rose-400 font-semibold"
+              onClick={confirmDeleteDraft}
             >
-              <Save className="mr-1.5 h-3.5 w-3.5" />
-              確認儲存
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              確認刪除
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1067,47 +1067,51 @@ export function MvpAccountingPage({ initialStep = "home" }: MvpAccountingPagePro
     })
   }
 
-  function saveDrafts() {
-    const missingAmountIndex = drafts.findIndex(item => item.amount <= 0)
-    if (missingAmountIndex !== -1) {
-      setBanner("有交易尚未填寫金額，請補齊後再送出。")
-      const amountEl = document.querySelector<HTMLInputElement>(`[data-draft-amount="${missingAmountIndex}"]`)
-      if (amountEl) {
-        amountEl.scrollIntoView({ behavior: "smooth", block: "center" })
-        setTimeout(() => amountEl.focus(), 300)
+  function saveDrafts(options?: { allowIncomplete?: boolean }) {
+    const allowIncomplete = options?.allowIncomplete ?? false
+    if (!allowIncomplete) {
+      const missingAmountIndex = drafts.findIndex(item => item.amount <= 0)
+      if (missingAmountIndex !== -1) {
+        setBanner("有交易尚未填寫金額，請補齊後再送出。")
+        const amountEl = document.querySelector<HTMLInputElement>(`[data-draft-amount="${missingAmountIndex}"]`)
+        if (amountEl) {
+          amountEl.scrollIntoView({ behavior: "smooth", block: "center" })
+          setTimeout(() => amountEl.focus(), 300)
+        }
+        return
       }
-      return
+
+      const missingDateIndex = drafts.findIndex(item => !item.occurred_at)
+      if (missingDateIndex !== -1) {
+        setBanner("有交易尚未填寫日期，請補齊後再送出。")
+        const el = document.querySelector<HTMLInputElement>(`[data-draft-date="${missingDateIndex}"]`)
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" })
+          setTimeout(() => el.focus(), 300)
+        }
+        return
+      }
+
+      const uncategorizedIndex = drafts.findIndex(item => item.category_key.includes("other") && !item.categoryTouched)
+      if (uncategorizedIndex !== -1) {
+        setBanner("有交易的類別尚未確認，請在下拉選單中明確選擇類別後再儲存。")
+        const el = document.querySelector<HTMLSelectElement>(`[data-draft-category="${uncategorizedIndex}"]`)
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" })
+          setTimeout(() => el.focus(), 300)
+        }
+        return
+      }
     }
 
-    const missingDateIndex = drafts.findIndex(item => !item.occurred_at)
-    if (missingDateIndex !== -1) {
-      setBanner("有交易尚未填寫日期，請補齊後再送出。")
-      const el = document.querySelector<HTMLInputElement>(`[data-draft-date="${missingDateIndex}"]`)
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
-        setTimeout(() => el.focus(), 300)
-      }
-      return
-    }
-
-    const uncategorizedIndex = drafts.findIndex(item => item.category_key.includes("other") && !item.categoryTouched)
-    if (uncategorizedIndex !== -1) {
-      setBanner("有交易的類別尚未確認，請在下拉選單中明確選擇類別後再儲存。")
-      const el = document.querySelector<HTMLSelectElement>(`[data-draft-category="${uncategorizedIndex}"]`)
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
-        setTimeout(() => el.focus(), 300)
-      }
-      return
-    }
-
-    const validDrafts = drafts.filter(item => !item.parse_error && item.amount > 0)
-    if (validDrafts.length === 0) {
+    const draftsToSave = allowIncomplete ? drafts : drafts.filter(item => !item.parse_error && item.amount > 0)
+    if (draftsToSave.length === 0) {
       setBanner("沒有可儲存的交易，請先補齊必填欄位。")
       return
     }
 
-    const normalized = validDrafts.map(item => {
+    const fallbackDate = new Date().toISOString().slice(0, 10)
+    const normalized = draftsToSave.map(item => {
       const safeDomain: Exclude<Domain, "unknown"> = item.domain === "business" ? "business" : "life"
       const safeDirection: Exclude<Direction, "unknown"> = item.direction === "income" ? "income" : "expense"
       const currentCategory = CATEGORY_BY_KEY.get(item.category_key)
@@ -1118,6 +1122,8 @@ export function MvpAccountingPage({ initialStep = "home" }: MvpAccountingPagePro
 
       return {
         ...toTransaction(item),
+        occurred_at: item.occurred_at || fallbackDate,
+        amount: allowIncomplete ? Math.max(0, Number(item.amount) || 0) : item.amount,
         domain: safeDomain,
         direction: safeDirection,
         category_key: category.category_key,
@@ -1132,7 +1138,11 @@ export function MvpAccountingPage({ initialStep = "home" }: MvpAccountingPagePro
     }
     setDrafts([])
     goToStep("home")
-    setBanner(`已儲存 ${normalized.length} 筆交易。`)
+    setBanner(
+      allowIncomplete
+        ? `已儲存 ${normalized.length} 筆交易，部分欄位可稍後在主頁編輯補齊。`
+        : `已儲存 ${normalized.length} 筆交易。`,
+    )
   }
 
   function rememberTemplate() {

@@ -105,7 +105,7 @@ export function QuickAddView({
       <Card className="border-white/20 bg-slate-900/70">
         <CardHeader className="pb-3">
           <CardTitle className="text-white text-base sm:text-lg">
-            {isFileMode ? "上傳帳單或檔案" : "輸入一筆收支"}
+            {isFileMode ? "上傳檔案" : "輸入一筆收支"}
           </CardTitle>
           <CardDescription className="text-slate-300 text-xs sm:text-sm">
             {isFileMode
@@ -152,7 +152,7 @@ export function QuickAddView({
                   onClick={() => onSwitchQuickAddMode("file_import")}
                 >
                   <FileUp className="h-4 w-4 shrink-0" />
-                  <span className="truncate">上傳帳單/檔案</span>
+                  <span className="truncate">上傳檔案</span>
                 </Button>
               </div>
               {isListening && (
